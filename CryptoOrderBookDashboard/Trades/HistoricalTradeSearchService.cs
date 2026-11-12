@@ -2,7 +2,10 @@ using System.Diagnostics;
 using Binance.Net.Enums;
 using Binance.Net.Interfaces;
 using Binance.Net.Interfaces.Clients;
+using CryptoOrderBookDashboard.Common;
 using CryptoOrderBookDashboard.OrderBooks;
+using CryptoOrderBookDashboard.OrderBooks.Configuration;
+using Microsoft.Extensions.Options;
 
 namespace CryptoOrderBookDashboard.Trades;
 
@@ -21,15 +24,24 @@ public enum HistoricalTradeSearchStatus
 
 public sealed record HistoricalTradeMatch(long Id, decimal Price, decimal Quantity, bool BuyerIsMaker, DateTime TradeTimeUtc);
 
-public sealed record HistoricalTradeSearchProgress(int MatchesSoFar, DateTime SearchedBackToUtc);
+// IsQueued: the search is waiting for a free server-wide search slot and hasn't started yet.
+public sealed record HistoricalTradeSearchProgress(int MatchesSoFar, DateTime SearchedBackToUtc, bool IsQueued = false);
 
 public sealed record HistoricalTradeSearchResult(
     HistoricalTradeSearchStatus Status,
     IReadOnlyList<HistoricalTradeMatch> Matches,
     DateTime SearchedBackToUtc);
 
-public sealed class HistoricalTradeSearchService(IBinanceRestClient restClient)
+// Registered as a singleton: the slot semaphore is what keeps many simultaneous users from
+// exhausting the server's shared Binance rate limit (which the live feeds depend on too).
+public sealed class HistoricalTradeSearchService(
+    IBinanceRestClient restClient,
+    IOptions<OrderBookDashboardOptions> options)
 {
+    private readonly SemaphoreSlim _searchSlots = new(
+        Math.Max(1, options.Value.MaxConcurrentHistoricalSearches),
+        Math.Max(1, options.Value.MaxConcurrentHistoricalSearches));
+
     // Search runs off the UI thread now (see TradeTapePanel), so this is a safety cap
     // against runaway API usage rather than something users have to sit through.
     private static readonly TimeSpan MaxSearchDuration = TimeSpan.FromMinutes(12);
@@ -57,6 +69,40 @@ public sealed class HistoricalTradeSearchService(IBinanceRestClient restClient)
         IProgress<HistoricalTradeSearchProgress>? progress,
         CancellationToken ct)
     {
+        if (!_searchSlots.Wait(0))
+        {
+            progress?.Report(new HistoricalTradeSearchProgress(0, DateTime.UtcNow, IsQueued: true));
+
+            try
+            {
+                await _searchSlots.WaitAsync(ct);
+            }
+            catch (OperationCanceledException)
+            {
+                return new HistoricalTradeSearchResult(HistoricalTradeSearchStatus.Cancelled, [], DateTime.UtcNow);
+            }
+        }
+
+        try
+        {
+            return await SearchAsync(market, symbol, minNotionalUsd, maxNotionalUsd, lookbackDays, progress, ct);
+        }
+        finally
+        {
+            _searchSlots.Release();
+        }
+    }
+
+    private async Task<HistoricalTradeSearchResult> SearchAsync(
+        MarketType market,
+        string symbol,
+        decimal? minNotionalUsd,
+        decimal? maxNotionalUsd,
+        int lookbackDays,
+        IProgress<HistoricalTradeSearchProgress>? progress,
+        CancellationToken ct)
+    {
+        // Time budget and lookback both start once a slot is acquired, not while queued.
         var cutoff = DateTime.UtcNow.AddDays(-lookbackDays);
         var now = DateTime.UtcNow;
         var stopwatch = Stopwatch.StartNew();
@@ -215,7 +261,7 @@ public sealed class HistoricalTradeSearchService(IBinanceRestClient restClient)
             {
                 if (trade.TradeTime >= start
                     && trade.TradeTime < end
-                    && MatchesRange(trade.Price * trade.Quantity, min, max))
+                    && Notional.InRange(trade.Price * trade.Quantity, min, max))
                 {
                     matches.Add(new HistoricalTradeMatch(trade.Id, trade.Price, trade.Quantity, trade.BuyerIsMaker, trade.TradeTime));
                 }
@@ -270,7 +316,4 @@ public sealed class HistoricalTradeSearchService(IBinanceRestClient restClient)
             symbol, fromId: fromId, startTime: startTime, endTime: endTime, limit: AggTradePageLimit, ct: ct),
         _ => throw new NotSupportedException($"Unsupported market type '{market}'")
     };
-
-    private static bool MatchesRange(decimal notional, decimal? min, decimal? max) =>
-        (min is null || notional >= min.Value) && (max is null || notional < max.Value);
 }

@@ -1,3 +1,4 @@
+using CryptoOrderBookDashboard.Common;
 using CryptoOrderBookDashboard.Components;
 using CryptoOrderBookDashboard.OrderBooks;
 using CryptoOrderBookDashboard.OrderBooks.Configuration;
@@ -14,11 +15,12 @@ builder.Services.Configure<OrderBookDashboardOptions>(
 builder.Services.AddBinance(options => { });
 builder.Services.AddSingleton<OrderBookStore>();
 builder.Services.AddHostedService<OrderBookHostedService>();
-builder.Services.AddHostedService<OrderBookRenderPulseService>();
 builder.Services.AddSingleton<TradeStore>();
 builder.Services.AddHostedService<TradeFeedHostedService>();
-builder.Services.AddHostedService<TradeRenderPulseService>();
-builder.Services.AddScoped<HistoricalTradeSearchService>();
+builder.Services.AddHostedService<RenderPulseService>();
+
+// Singleton so its concurrency limit applies across all users/circuits.
+builder.Services.AddSingleton<HistoricalTradeSearchService>();
 
 var app = builder.Build();
 

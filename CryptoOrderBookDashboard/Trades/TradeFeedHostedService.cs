@@ -24,11 +24,7 @@ public sealed class TradeFeedHostedService(
 
         foreach (var tracked in settings.Symbols)
         {
-            var markets = tracked.Markets.Count > 0
-                ? tracked.Markets
-                : [MarketType.Spot, MarketType.UsdFutures];
-
-            foreach (var market in markets)
+            foreach (var market in tracked.GetMarkets())
             {
                 var key = new OrderBookKey(market, tracked.Symbol);
                 var symbol = tracked.Symbol;

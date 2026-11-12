@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using CryptoOrderBookDashboard.Common;
 using CryptoOrderBookDashboard.OrderBooks;
 
 namespace CryptoOrderBookDashboard.Trades;
@@ -13,6 +14,9 @@ public sealed class TradeStore
     {
         public readonly object Gate = new();
         public readonly List<TradeEntry> Trades = new(Capacity);
+
+        // Bumped whenever Trades changes, so panels can skip re-rendering a quiet market.
+        public long Version;
     }
 
     private readonly ConcurrentDictionary<OrderBookKey, TradeBucket> _buckets = new();
@@ -44,10 +48,14 @@ public sealed class TradeStore
 
             bucket.Trades.Clear();
             bucket.Trades.AddRange(merged);
+            Interlocked.Increment(ref bucket.Version);
         }
     }
 
     public void RaiseChanged() => Changed?.Invoke();
+
+    public long GetVersion(OrderBookKey key) =>
+        _buckets.TryGetValue(key, out var bucket) ? Interlocked.Read(ref bucket.Version) : -1;
 
     public void AddTrade(OrderBookKey key, TradeEntry trade)
     {
@@ -70,6 +78,8 @@ public sealed class TradeStore
             {
                 bucket.Trades.RemoveAt(bucket.Trades.Count - 1);
             }
+
+            Interlocked.Increment(ref bucket.Version);
         }
     }
 
@@ -91,7 +101,7 @@ public sealed class TradeStore
             }
 
             return bucket.Trades
-                .Where(t => MatchesRange(t.Price * t.Quantity, minNotionalUsd, maxNotionalUsd))
+                .Where(t => Notional.InRange(t.Price * t.Quantity, minNotionalUsd, maxNotionalUsd))
                 .Take(MaxFilteredRows)
                 .ToList();
         }
@@ -123,7 +133,7 @@ public sealed class TradeStore
                 }
 
                 var notional = trade.Price * trade.Quantity;
-                if (!MatchesRange(notional, minNotionalUsd, maxNotionalUsd))
+                if (!Notional.InRange(notional, minNotionalUsd, maxNotionalUsd))
                 {
                     continue;
                 }
@@ -141,7 +151,4 @@ public sealed class TradeStore
 
         return (buy, sell);
     }
-
-    private static bool MatchesRange(decimal notional, decimal? min, decimal? max) =>
-        (min is null || notional >= min.Value) && (max is null || notional < max.Value);
 }

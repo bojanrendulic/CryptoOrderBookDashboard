@@ -1,0 +1,47 @@
+@inject IOptions<OrderBookDashboardOptions> Options
+
+@* Symbol + notional range selectors shared by the Order Book and Trades pages.
+   Symbols come from configuration, so adding one to appsettings.json is enough. *@
+<div class="d-flex align-items-center gap-2 mb-4">
+    <label for="@($"{IdPrefix}-symbol")" class="mb-0">Symbol:</label>
+    <select id="@($"{IdPrefix}-symbol")" class="form-select w-auto" value="@Symbol" @onchange="OnSymbolChangedAsync">
+        @foreach (var tracked in Options.Value.Symbols)
+        {
+            <option value="@tracked.Symbol">@tracked.GetDisplayName()</option>
+        }
+    </select>
+
+    <label for="@($"{IdPrefix}-size")" class="mb-0">@SizeLabel:</label>
+    <select id="@($"{IdPrefix}-size")" class="form-select w-auto" value="@Range.Key" @onchange="OnRangeChangedAsync">
+        @foreach (var range in NotionalRange.Presets)
+        {
+            <option value="@range.Key">@range.Label</option>
+        }
+    </select>
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public string IdPrefix { get; set; } = string.Empty;
+
+    [Parameter]
+    public string SizeLabel { get; set; } = "Size";
+
+    [Parameter]
+    public string Symbol { get; set; } = string.Empty;
+
+    [Parameter]
+    public EventCallback<string> SymbolChanged { get; set; }
+
+    [Parameter]
+    public NotionalRange Range { get; set; } = NotionalRange.Default;
+
+    [Parameter]
+    public EventCallback<NotionalRange> RangeChanged { get; set; }
+
+    private Task OnSymbolChangedAsync(ChangeEventArgs e) =>
+        SymbolChanged.InvokeAsync(e.Value?.ToString() ?? string.Empty);
+
+    private Task OnRangeChangedAsync(ChangeEventArgs e) =>
+        RangeChanged.InvokeAsync(NotionalRange.FromKey(e.Value?.ToString()));
+}
