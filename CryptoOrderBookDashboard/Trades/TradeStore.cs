@@ -23,7 +23,10 @@ public sealed class TradeStore
 
     public void Unregister(OrderBookKey key) => _buckets.TryRemove(key, out _);
 
-    public void Seed(OrderBookKey key, IEnumerable<TradeEntry> trades)
+    // Merges a REST backfill into whatever the live stream has already delivered. The feed
+    // subscribes before backfilling (and backfills again after a reconnect), so the two sets
+    // overlap - de-duplicating by aggregate trade id closes the gap without double-counting.
+    public void Merge(OrderBookKey key, IEnumerable<TradeEntry> trades)
     {
         if (!_buckets.TryGetValue(key, out var bucket))
         {
@@ -32,8 +35,15 @@ public sealed class TradeStore
 
         lock (bucket.Gate)
         {
+            var merged = bucket.Trades
+                .Concat(trades)
+                .DistinctBy(t => t.Id)
+                .OrderByDescending(t => t.Id)
+                .Take(Capacity)
+                .ToList();
+
             bucket.Trades.Clear();
-            bucket.Trades.AddRange(trades.Take(Capacity));
+            bucket.Trades.AddRange(merged);
         }
     }
 
@@ -48,6 +58,13 @@ public sealed class TradeStore
 
         lock (bucket.Gate)
         {
+            // Stream ids only ever increase, so anything at or below the newest stored id was
+            // already added (e.g. by a backfill that raced the stream).
+            if (bucket.Trades.Count > 0 && trade.Id <= bucket.Trades[0].Id)
+            {
+                return;
+            }
+
             bucket.Trades.Insert(0, trade);
             if (bucket.Trades.Count > Capacity)
             {

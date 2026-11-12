@@ -53,6 +53,9 @@
                         case HistoricalTradeSearchStatus.Completed:
                             <span>Found @_historicalMatches.Count matching trade(s) in the last @_searchLookbackDays days (shown below).</span>
                             break;
+                        case HistoricalTradeSearchStatus.Incomplete:
+                            <span>Found @_historicalMatches.Count matching trade(s) in the last @_searchLookbackDays days, but some very busy hours were only partially scanned — there may be more.</span>
+                            break;
                         case HistoricalTradeSearchStatus.TimedOut:
                             <span>Search stopped early (took too long) — found @_historicalMatches.Count so far, checked back to @_searchResult.SearchedBackToUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss").</span>
                             break;
@@ -120,7 +123,11 @@
 
     protected override void OnParametersSet()
     {
+        // The panel instance is reused when the symbol or size range changes, so detach the
+        // running search entirely - otherwise its (old symbol's) result would still be applied.
         CancelSearch();
+        _searchCts = null;
+        _isSearching = false;
         _searchResult = null;
         _searchProgress = null;
         _historicalMatches = [];
@@ -177,11 +184,26 @@
 
                 _searchResult = result;
                 _historicalMatches = result.Matches
-                    .Select(m => new TradeEntry(m.Price, m.Quantity, m.BuyerIsMaker, m.TradeTimeUtc))
+                    .Select(m => new TradeEntry(m.Id, m.Price, m.Quantity, m.BuyerIsMaker, m.TradeTimeUtc))
                     .ToList();
                 _isSearching = false;
                 StateHasChanged();
             });
+        }
+        catch (Exception) when (!_disposed && _searchCts == cts)
+        {
+            // Without this the fire-and-forget search would leave the panel stuck on
+            // "Searching..." with its buttons disabled.
+            await InvokeAsync(() =>
+            {
+                _searchResult = new HistoricalTradeSearchResult(HistoricalTradeSearchStatus.ApiError, [], DateTime.UtcNow);
+                _isSearching = false;
+                StateHasChanged();
+            });
+        }
+        catch (Exception)
+        {
+            // Search was superseded or the panel is gone - nobody is waiting for this result.
         }
         finally
         {
@@ -215,13 +237,31 @@
         });
     }
 
+    // async void because it's an event handler - every exception must be caught here, since
+    // one escaping onto the thread pool would take down the whole process.
     private async void OnStoreChanged()
     {
-        await InvokeAsync(() =>
+        if (_disposed)
         {
-            Refresh();
-            StateHasChanged();
-        });
+            return;
+        }
+
+        try
+        {
+            await InvokeAsync(() =>
+            {
+                Refresh();
+                StateHasChanged();
+            });
+        }
+        catch (ObjectDisposedException)
+        {
+            // Circuit was torn down between the pulse and this render.
+        }
+        catch (Exception ex)
+        {
+            await DispatchExceptionAsync(ex);
+        }
     }
 
     private void Refresh()
@@ -268,7 +308,8 @@
     {
         _disposed = true;
         Store.Changed -= OnStoreChanged;
-        _searchCts?.Cancel();
-        _searchCts?.Dispose();
+
+        // RunSearchAsync's finally disposes the token source once the search unwinds.
+        CancelSearch();
     }
 }

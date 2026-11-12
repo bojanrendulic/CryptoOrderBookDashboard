@@ -30,18 +30,22 @@ public sealed class OrderBookStore
             return OrderBookSnapshot.Empty;
         }
 
+        // Read both sides in one call so they come from the same book state - reading Bids and
+        // Asks separately can straddle an update and briefly show a crossed book.
+        var (bookBids, bookAsks) = book.Book;
+
         List<PriceLevel> bids;
         List<PriceLevel> asks;
 
         if (minNotionalUsd is not null || maxNotionalUsd is not null)
         {
-            bids = book.Bids
+            bids = bookBids
                 .Where(e => MatchesRange(e.Price * e.Quantity, minNotionalUsd, maxNotionalUsd))
                 .Take(MaxFilteredRows)
                 .Select(e => new PriceLevel(e.Price, e.Quantity))
                 .ToList();
 
-            asks = book.Asks
+            asks = bookAsks
                 .Where(e => MatchesRange(e.Price * e.Quantity, minNotionalUsd, maxNotionalUsd))
                 .Take(MaxFilteredRows)
                 .Select(e => new PriceLevel(e.Price, e.Quantity))
@@ -49,12 +53,12 @@ public sealed class OrderBookStore
         }
         else
         {
-            bids = book.Bids
+            bids = bookBids
                 .Take(levels)
                 .Select(e => new PriceLevel(e.Price, e.Quantity))
                 .ToList();
 
-            asks = book.Asks
+            asks = bookAsks
                 .Take(levels)
                 .Select(e => new PriceLevel(e.Price, e.Quantity))
                 .ToList();

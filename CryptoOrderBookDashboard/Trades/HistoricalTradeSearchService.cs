@@ -13,9 +13,13 @@ public enum HistoricalTradeSearchStatus
     MatchLimitReached,
     Cancelled,
     ApiError,
+
+    // Every candidate hour was visited, but at least one was too busy to page through
+    // completely within MaxPagesPerWindow, so matches late in that hour may be missing.
+    Incomplete,
 }
 
-public sealed record HistoricalTradeMatch(decimal Price, decimal Quantity, bool BuyerIsMaker, DateTime TradeTimeUtc);
+public sealed record HistoricalTradeMatch(long Id, decimal Price, decimal Quantity, bool BuyerIsMaker, DateTime TradeTimeUtc);
 
 public sealed record HistoricalTradeSearchProgress(int MatchesSoFar, DateTime SearchedBackToUtc);
 
@@ -42,7 +46,7 @@ public sealed class HistoricalTradeSearchService(IBinanceRestClient restClient)
     // Binance's rate limit / IP ban, which previously caused silent under-reporting.
     private const int MaxConcurrentWindows = 4;
 
-    private sealed record WindowScanResult(List<HistoricalTradeMatch> Matches, bool Failed);
+    private sealed record WindowScanResult(List<HistoricalTradeMatch> Matches, bool Failed, bool Truncated);
 
     public async Task<HistoricalTradeSearchResult> FindTradesInRangeAsync(
         MarketType market,
@@ -57,23 +61,29 @@ public sealed class HistoricalTradeSearchService(IBinanceRestClient restClient)
         var now = DateTime.UtcNow;
         var stopwatch = Stopwatch.StartNew();
         var searchedBackTo = now;
-
-        // Hourly candles for the lookback window (up to 30 days = 720 rows) stay well within
-        // the 1000-row limit, so the whole window's volume profile comes back in one call.
-        var klines = await GetKlinesAsync(market, symbol, cutoff, now, ct);
-
-        // An hour's total volume is a hard lower bound for any single trade within it, so
-        // this can never skip an hour that actually contains a qualifying trade - hours that
-        // don't meet it are provably safe to skip without spending any verification calls.
-        var candidates = klines
-            .Where(c => minNotionalUsd is null || c.QuoteVolume >= minNotionalUsd.Value)
-            .OrderByDescending(c => c.OpenTime)
-            .ToList();
-
         var matches = new List<HistoricalTradeMatch>();
+        var anyTruncated = false;
 
         try
         {
+            // Hourly candles for the lookback window (up to 30 days = 720 rows) stay well within
+            // the 1000-row limit, so the whole window's volume profile comes back in one call.
+            var klines = await GetKlinesAsync(market, symbol, cutoff, now, ct);
+            if (klines is null)
+            {
+                // Without the volume profile nothing was searched - reporting "Completed" with
+                // zero matches here would be a false negative.
+                return new HistoricalTradeSearchResult(HistoricalTradeSearchStatus.ApiError, matches, searchedBackTo);
+            }
+
+            // An hour's total volume is a hard lower bound for any single trade within it, so
+            // this can never skip an hour that actually contains a qualifying trade - hours that
+            // don't meet it are provably safe to skip without spending any verification calls.
+            var candidates = klines
+                .Where(c => minNotionalUsd is null || c.QuoteVolume >= minNotionalUsd.Value)
+                .OrderByDescending(c => c.OpenTime)
+                .ToList();
+
             for (var i = 0; i < candidates.Count; i += MaxConcurrentWindows)
             {
                 ct.ThrowIfCancellationRequested();
@@ -90,6 +100,7 @@ public sealed class HistoricalTradeSearchService(IBinanceRestClient restClient)
                 foreach (var windowResult in batchResults)
                 {
                     matches.AddRange(windowResult.Matches);
+                    anyTruncated |= windowResult.Truncated;
                 }
 
                 searchedBackTo = batch.Min(c => c.OpenTime);
@@ -118,13 +129,16 @@ public sealed class HistoricalTradeSearchService(IBinanceRestClient restClient)
             return new HistoricalTradeSearchResult(HistoricalTradeSearchStatus.Cancelled, Finalize(matches), searchedBackTo);
         }
 
-        return new HistoricalTradeSearchResult(HistoricalTradeSearchStatus.Completed, Finalize(matches), cutoff);
+        var status = anyTruncated ? HistoricalTradeSearchStatus.Incomplete : HistoricalTradeSearchStatus.Completed;
+        return new HistoricalTradeSearchResult(status, Finalize(matches), cutoff);
     }
 
     private static List<HistoricalTradeMatch> Finalize(List<HistoricalTradeMatch> matches) =>
         matches.OrderByDescending(m => m.TradeTimeUtc).ToList();
 
-    private async Task<List<IBinanceKline>> GetKlinesAsync(
+    // Returns null when the kline request fails, so callers can tell "no candidate hours"
+    // apart from "couldn't find out".
+    private async Task<List<IBinanceKline>?> GetKlinesAsync(
         MarketType market,
         string symbol,
         DateTime start,
@@ -140,7 +154,7 @@ public sealed class HistoricalTradeSearchService(IBinanceRestClient restClient)
             _ => throw new NotSupportedException($"Unsupported market type '{market}'")
         };
 
-        return result.Success ? result.Data.ToList() : [];
+        return result.Success ? result.Data.ToList() : null;
     }
 
     // Scans one hour-long window for qualifying trades. Binance caps aggTrades time-range
@@ -161,8 +175,15 @@ public sealed class HistoricalTradeSearchService(IBinanceRestClient restClient)
         long? fromId = null;
         var pages = 0;
 
-        while (pages < MaxPagesPerWindow)
+        while (true)
         {
+            if (pages >= MaxPagesPerWindow)
+            {
+                // Page budget spent before reaching the end of the hour - the rest of it was
+                // never looked at, so this window must not count as fully covered.
+                return new WindowScanResult(matches, Failed: false, Truncated: true);
+            }
+
             if (pages > 0)
             {
                 // Spread out pagination within a busy hour instead of firing pages back to
@@ -181,7 +202,7 @@ public sealed class HistoricalTradeSearchService(IBinanceRestClient restClient)
             {
                 // Non-transient failure (or retries exhausted) - this hour could not be fully
                 // verified. Report it as failed rather than silently treating it as "no matches".
-                return new WindowScanResult(matches, Failed: true);
+                return new WindowScanResult(matches, Failed: true, Truncated: false);
             }
 
             var page = result.Data.OrderBy(t => t.TradeTime).ToList();
@@ -196,7 +217,7 @@ public sealed class HistoricalTradeSearchService(IBinanceRestClient restClient)
                     && trade.TradeTime < end
                     && MatchesRange(trade.Price * trade.Quantity, min, max))
                 {
-                    matches.Add(new HistoricalTradeMatch(trade.Price, trade.Quantity, trade.BuyerIsMaker, trade.TradeTime));
+                    matches.Add(new HistoricalTradeMatch(trade.Id, trade.Price, trade.Quantity, trade.BuyerIsMaker, trade.TradeTime));
                 }
             }
 
@@ -210,7 +231,7 @@ public sealed class HistoricalTradeSearchService(IBinanceRestClient restClient)
             fromId = last.Id + 1;
         }
 
-        return new WindowScanResult(matches, Failed: false);
+        return new WindowScanResult(matches, Failed: false, Truncated: false);
     }
 
     // Retries transient failures (rate limits, timeouts) with a short backoff, so a busy

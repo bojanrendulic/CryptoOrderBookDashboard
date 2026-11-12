@@ -31,10 +31,12 @@ public sealed class TradeFeedHostedService(
             foreach (var market in markets)
             {
                 var key = new OrderBookKey(market, tracked.Symbol);
+                var symbol = tracked.Symbol;
                 store.Register(key);
 
-                await BackfillAsync(key, market, tracked.Symbol, stoppingToken);
-
+                // Subscribe first, then backfill: the backfill overlaps whatever the stream has
+                // already delivered and the store de-duplicates by id, so no trades fall into a
+                // gap between the REST snapshot and the first stream message.
                 var result = market switch
                 {
                     MarketType.Spot => await socketClient.SpotApi.ExchangeData.SubscribeToAggregatedTradeUpdatesAsync(
@@ -51,11 +53,17 @@ public sealed class TradeFeedHostedService(
                 if (result.Success)
                 {
                     _subscriptions.Add((key, result.Data));
+
+                    // Trades executed while the socket was down are never replayed by the
+                    // stream, so fill that hole from REST once the connection comes back.
+                    result.Data.ConnectionRestored += downtime => _ = SafeBackfillAsync(key, market, symbol, stoppingToken);
                 }
                 else
                 {
                     logger.LogError("Failed to subscribe to trades for {Key}: {Error}", key, result.Error);
                 }
+
+                await SafeBackfillAsync(key, market, symbol, stoppingToken);
             }
         }
 
@@ -70,7 +78,23 @@ public sealed class TradeFeedHostedService(
     }
 
     private void OnTrade(OrderBookKey key, BinanceStreamAggregatedTrade trade) =>
-        store.AddTrade(key, new TradeEntry(trade.Price, trade.Quantity, trade.BuyerIsMaker, trade.TradeTime));
+        store.AddTrade(key, new TradeEntry(trade.Id, trade.Price, trade.Quantity, trade.BuyerIsMaker, trade.TradeTime));
+
+    private async Task SafeBackfillAsync(OrderBookKey key, MarketType market, string symbol, CancellationToken ct)
+    {
+        try
+        {
+            await BackfillAsync(key, market, symbol, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // shutting down
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Trade backfill for {Key} failed", key);
+        }
+    }
 
     private async Task BackfillAsync(OrderBookKey key, MarketType market, string symbol, CancellationToken ct)
     {
@@ -94,10 +118,9 @@ public sealed class TradeFeedHostedService(
         }
 
         var trades = result.Data
-            .OrderByDescending(t => t.TradeTime)
-            .Select(t => new TradeEntry(t.Price, t.Quantity, t.BuyerIsMaker, t.TradeTime));
+            .Select(t => new TradeEntry(t.Id, t.Price, t.Quantity, t.BuyerIsMaker, t.TradeTime));
 
-        store.Seed(key, trades);
+        store.Merge(key, trades);
     }
 
     public override async Task StopAsync(CancellationToken cancellationToken)

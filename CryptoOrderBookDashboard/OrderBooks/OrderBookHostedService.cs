@@ -55,7 +55,7 @@ public sealed class OrderBookHostedService(
             }
         }
 
-        await Task.WhenAll(_books.Select(b => b.Book.StartAsync(stoppingToken)));
+        await Task.WhenAll(_books.Select(b => StartWithRetryAsync(b.Key, b.Book, stoppingToken)));
 
         try
         {
@@ -77,6 +77,36 @@ public sealed class OrderBookHostedService(
         }
 
         await base.StopAsync(cancellationToken);
+    }
+
+    // The library reconnects a book that was synced once, but if the very first start fails
+    // the book just sits in Disconnected forever - so keep retrying with a capped backoff.
+    private async Task StartWithRetryAsync(OrderBookKey key, ISymbolOrderBook book, CancellationToken ct)
+    {
+        var delay = TimeSpan.FromSeconds(2);
+        var maxDelay = TimeSpan.FromMinutes(1);
+
+        while (!ct.IsCancellationRequested)
+        {
+            var result = await book.StartAsync(ct);
+            if (result.Success)
+            {
+                return;
+            }
+
+            logger.LogWarning("Failed to start order book {Key}: {Error}. Retrying in {Delay}", key, result.Error, delay);
+
+            try
+            {
+                await Task.Delay(delay, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+
+            delay = TimeSpan.FromTicks(Math.Min(delay.Ticks * 2, maxDelay.Ticks));
+        }
     }
 
     private static Action<BinanceOrderBookOptions> Configure(OrderBookDashboardOptions settings) => o =>
