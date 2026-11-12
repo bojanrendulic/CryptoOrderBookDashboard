@@ -1,0 +1,163 @@
+.order-book-panel {
+    border: 1px solid #333;
+    border-radius: 6px;
+    padding: 0.75rem;
+    background-color: #111;
+    color: #eee;
+    font-family: "Consolas", "Courier New", monospace;
+    font-size: 0.85rem;
+}
+
+.order-book-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.25rem;
+}
+
+.order-book-title {
+    font-weight: 600;
+}
+
+.order-book-market {
+    color: #888;
+    font-weight: 400;
+}
+
+.order-book-status {
+    padding: 0.1rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+}
+
+.status-synced {
+    background-color: #1e5b2e;
+    color: #b6f2c1;
+}
+
+.status-syncing, .status-connecting, .status-reconnecting {
+    background-color: #6b5a1e;
+    color: #f2e3b6;
+}
+
+.status-disconnected {
+    background-color: #5b1e1e;
+    color: #f2b6b6;
+}
+
+.order-book-spread {
+    display: flex;
+    gap: 1rem;
+    color: #999;
+    margin-bottom: 0.5rem;
+}
+
+.order-book-empty {
+    color: #888;
+    text-align: center;
+    padding: 1rem 0;
+}
+
+.order-book-columns {
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100vh - 220px);
+    overflow-y: auto;
+}
+
+.order-book-side {
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+}
+
+.order-book-spread-marker {
+    flex-shrink: 0;
+    border-top: 1px dashed #444;
+}
+
+.order-book-row {
+    position: relative;
+    display: flex;
+    justify-content: space-between;
+    padding: 0.05rem 0.25rem 0.05rem 0.65rem;
+}
+
+.size-indicator {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    z-index: 1;
+}
+
+.asks .size-indicator {
+    background-color: #ff5252;
+}
+
+.bids .size-indicator {
+    background-color: #4caf50;
+}
+
+.size-tier-0 .size-indicator {
+    width: 2px;
+    opacity: 0.3;
+}
+
+.size-tier-1 .size-indicator {
+    width: 3px;
+    opacity: 0.45;
+}
+
+.size-tier-2 .size-indicator {
+    width: 4px;
+    opacity: 0.6;
+}
+
+.size-tier-3 .size-indicator {
+    width: 5px;
+    opacity: 0.75;
+}
+
+.size-tier-4 .size-indicator {
+    width: 6px;
+    opacity: 0.9;
+}
+
+.size-tier-5 .size-indicator {
+    width: 7px;
+    opacity: 1;
+}
+
+.depth-bar {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: 0;
+    z-index: 0;
+    opacity: 0.25;
+}
+
+.bid-bar {
+    background-color: #2e7d32;
+    right: auto;
+    left: 0;
+}
+
+.ask-bar {
+    background-color: #c62828;
+}
+
+.price, .qty {
+    position: relative;
+    z-index: 1;
+}
+
+.asks .price {
+    color: #ff6b6b;
+}
+
+.bids .price {
+    color: #4caf50;
+}

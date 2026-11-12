@@ -1,0 +1,274 @@
+@using System.Globalization
+@implements IDisposable
+@inject TradeStore Store
+@inject HistoricalTradeSearchService SearchService
+
+<div class="trade-tape-panel">
+    <div class="trade-tape-header">
+        <span class="trade-tape-title">@Symbol <span class="trade-tape-market">@MarketLabel</span></span>
+    </div>
+
+    <div class="trade-tape-delta">
+        <span class="buy">Buy (60s): @FormatUsd(_buyVolumeUsd)</span>
+        <span class="sell">Sell (60s): @FormatUsd(_sellVolumeUsd)</span>
+        <span class="delta @DeltaClass">Delta: @FormatUsd(_buyVolumeUsd - _sellVolumeUsd)</span>
+    </div>
+
+    @if ((MinNotionalUsd is not null || MaxNotionalUsd is not null) && _trades.Count == 0)
+    {
+        <div class="trade-tape-empty">
+            <div>No trades in the selected size range currently.</div>
+            <button class="btn btn-sm btn-outline-light mt-2" @onclick="() => StartSearch(7)" disabled="@_isSearching">
+                Find matching trades (last 7 days)
+            </button>
+            <button class="btn btn-sm btn-outline-light mt-2" @onclick="() => StartSearch(30)" disabled="@_isSearching">
+                Find matching trades (last 30 days)
+            </button>
+            @if (_isSearching)
+            {
+                <button class="btn btn-sm btn-outline-danger mt-2" @onclick="CancelSearch">Cancel</button>
+            }
+
+            @if (_isSearching)
+            {
+                <div class="trade-tape-search-result">
+                    @if (_searchProgress is { } p)
+                    {
+                        <span>Searching (last @_searchLookbackDays days)... found @p.MatchesSoFar so far, checked back to @p.SearchedBackToUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss").</span>
+                    }
+                    else
+                    {
+                        <span>Searching (last @_searchLookbackDays days)...</span>
+                    }
+                </div>
+            }
+            else if (_searchResult is not null)
+            {
+                <div class="trade-tape-search-result">
+                    @switch (_searchResult.Status)
+                    {
+                        case HistoricalTradeSearchStatus.Completed when _historicalMatches.Count == 0:
+                            <span>No matching trades found in the last @_searchLookbackDays days.</span>
+                            break;
+                        case HistoricalTradeSearchStatus.Completed:
+                            <span>Found @_historicalMatches.Count matching trade(s) in the last @_searchLookbackDays days (shown below).</span>
+                            break;
+                        case HistoricalTradeSearchStatus.TimedOut:
+                            <span>Search stopped early (took too long) — found @_historicalMatches.Count so far, checked back to @_searchResult.SearchedBackToUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss").</span>
+                            break;
+                        case HistoricalTradeSearchStatus.ApiError:
+                            <span>Search stopped early (API error, likely rate-limited) — found @_historicalMatches.Count so far, checked back to @_searchResult.SearchedBackToUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss"). Try again in a minute.</span>
+                            break;
+                        case HistoricalTradeSearchStatus.MatchLimitReached:
+                            <span>Showing the most recent @_historicalMatches.Count matches — there may be more further back.</span>
+                            break;
+                        case HistoricalTradeSearchStatus.Cancelled:
+                            <span>Search cancelled — found @_historicalMatches.Count so far, checked back to @_searchResult.SearchedBackToUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss").</span>
+                            break;
+                    }
+                </div>
+            }
+        </div>
+    }
+
+    <div class="trade-tape-rows">
+        @foreach (var trade in _trades)
+        {
+            @RenderRow(trade, showDate: false)
+        }
+        @foreach (var historicalTrade in _historicalMatches)
+        {
+            @RenderRow(historicalTrade, showDate: true)
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public MarketType Market { get; set; }
+
+    [Parameter, EditorRequired]
+    public string Symbol { get; set; } = string.Empty;
+
+    [Parameter]
+    public decimal? MinNotionalUsd { get; set; }
+
+    [Parameter]
+    public decimal? MaxNotionalUsd { get; set; }
+
+    private static readonly TimeSpan DeltaWindow = TimeSpan.FromSeconds(60);
+
+    private IReadOnlyList<TradeEntry> _trades = [];
+    private decimal _buyVolumeUsd;
+    private decimal _sellVolumeUsd;
+    private bool _isSearching;
+    private int _searchLookbackDays;
+    private HistoricalTradeSearchResult? _searchResult;
+    private HistoricalTradeSearchProgress? _searchProgress;
+    private List<TradeEntry> _historicalMatches = [];
+    private CancellationTokenSource? _searchCts;
+    private bool _disposed;
+
+    private string MarketLabel => Market == MarketType.Spot ? "Spot" : "USD-M Futures";
+
+    private string DeltaClass => _buyVolumeUsd >= _sellVolumeUsd ? "buy" : "sell";
+
+    protected override void OnInitialized()
+    {
+        Store.Changed += OnStoreChanged;
+    }
+
+    protected override void OnParametersSet()
+    {
+        CancelSearch();
+        _searchResult = null;
+        _searchProgress = null;
+        _historicalMatches = [];
+        Refresh();
+    }
+
+    private void StartSearch(int lookbackDays)
+    {
+        CancelSearch();
+        var cts = new CancellationTokenSource();
+        _searchCts = cts;
+
+        _isSearching = true;
+        _searchLookbackDays = lookbackDays;
+        _searchResult = null;
+        _searchProgress = null;
+        _historicalMatches = [];
+
+        _ = RunSearchAsync(lookbackDays, cts);
+    }
+
+    private void CancelSearch()
+    {
+        try
+        {
+            _searchCts?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // A previous search already finished and disposed its token source.
+        }
+    }
+
+    private async Task RunSearchAsync(int lookbackDays, CancellationTokenSource cts)
+    {
+        var progress = new Progress<HistoricalTradeSearchProgress>(p => ReportProgress(p, cts));
+
+        try
+        {
+            var result = await SearchService.FindTradesInRangeAsync(
+                Market, Symbol, MinNotionalUsd, MaxNotionalUsd, lookbackDays, progress, cts.Token);
+
+            if (_disposed || _searchCts != cts)
+            {
+                return;
+            }
+
+            await InvokeAsync(() =>
+            {
+                if (_disposed || _searchCts != cts)
+                {
+                    return;
+                }
+
+                _searchResult = result;
+                _historicalMatches = result.Matches
+                    .Select(m => new TradeEntry(m.Price, m.Quantity, m.BuyerIsMaker, m.TradeTimeUtc))
+                    .ToList();
+                _isSearching = false;
+                StateHasChanged();
+            });
+        }
+        finally
+        {
+            // Once this search's token source is disposed, drop the shared reference so a
+            // later Cancel() (e.g. from OnParametersSet or a fresh StartSearch) can't hit it.
+            if (_searchCts == cts)
+            {
+                _searchCts = null;
+            }
+
+            cts.Dispose();
+        }
+    }
+
+    private void ReportProgress(HistoricalTradeSearchProgress p, CancellationTokenSource cts)
+    {
+        if (_disposed || _searchCts != cts)
+        {
+            return;
+        }
+
+        _ = InvokeAsync(() =>
+        {
+            if (_disposed || _searchCts != cts)
+            {
+                return;
+            }
+
+            _searchProgress = p;
+            StateHasChanged();
+        });
+    }
+
+    private async void OnStoreChanged()
+    {
+        await InvokeAsync(() =>
+        {
+            Refresh();
+            StateHasChanged();
+        });
+    }
+
+    private void Refresh()
+    {
+        var key = new OrderBookKey(Market, Symbol);
+        _trades = Store.GetTrades(key, MinNotionalUsd, MaxNotionalUsd);
+        (_buyVolumeUsd, _sellVolumeUsd) = Store.GetVolumeDelta(key, DeltaWindow, MinNotionalUsd, MaxNotionalUsd);
+    }
+
+    private RenderFragment RenderRow(TradeEntry trade, bool showDate)
+    {
+        var side = trade.BuyerIsMaker ? "sell" : "buy";
+        var tier = SizeTier(trade.Price * trade.Quantity);
+        var cssClass = showDate
+            ? $"trade-row {side} size-tier-{tier} historical"
+            : $"trade-row {side} size-tier-{tier}";
+        var time = showDate
+            ? trade.TradeTimeUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss")
+            : trade.TradeTimeUtc.ToLocalTime().ToString("HH:mm:ss.fff");
+
+        return @<div class="@cssClass">
+            <div class="size-indicator"></div>
+            <span class="time">@time</span>
+            <span class="price">@FormatNumber(trade.Price)</span>
+            <span class="qty">@FormatNumber(trade.Quantity)</span>
+        </div>;
+    }
+
+    private static int SizeTier(decimal notionalUsd) => notionalUsd switch
+    {
+        < 10_000m => 0,
+        < 50_000m => 1,
+        < 250_000m => 2,
+        < 1_000_000m => 3,
+        < 5_000_000m => 4,
+        _ => 5,
+    };
+
+    private static string FormatNumber(decimal value) => value.ToString("0.####", CultureInfo.InvariantCulture);
+
+    private static string FormatUsd(decimal value) => value.ToString("#,##0", CultureInfo.InvariantCulture);
+
+    public void Dispose()
+    {
+        _disposed = true;
+        Store.Changed -= OnStoreChanged;
+        _searchCts?.Cancel();
+        _searchCts?.Dispose();
+    }
+}
