@@ -9,7 +9,7 @@ It streams live market data over WebSockets, keeps fully synchronized local orde
 - **Live order books**: full diff-stream sync per symbol and market, with depth bars, spread, mid price and a feed status indicator (Connecting / Syncing / Synced / Reconnecting).
 - **Size filter**: show only resting orders in a chosen notional range, from under $10k up to $100M+. Rows are colour-coded by size tier.
 - **Trade tape**: live aggregated trades with buy/sell coloring, plus buy volume, sell volume and delta over the last 60 seconds.
-- **Historical large-trade search**: when no recent trade matches the selected size range, search the last 7 or 30 days. Hourly volume is used to skip hours that can't contain a qualifying trade. The search reports progress, can be cancelled, and states clearly when its results are incomplete (rate limits, time cap, very busy hours).
+- **Historical large-trade search**: when no recent trade matches the selected size range, search the last 7 or 30 days. Hourly volume is used to skip hours that can't contain a qualifying trade. The search reports progress, can be cancelled, and states clearly when its results are incomplete (rate limits, time cap, very busy hours). A server-wide limit caps concurrent searches so they can't exhaust the Binance rate limit the live feeds rely on.
 - **Spot and Futures side by side** for every tracked symbol.
 - Public market data only. **No API keys required.**
 
@@ -45,6 +45,7 @@ Tracked symbols and refresh settings live in `CryptoOrderBookDashboard/appsettin
 "OrderBookDashboard": {
   "DepthLevels": 20,
   "UpdateThrottleMilliseconds": 250,
+  "MaxConcurrentHistoricalSearches": 2,
   "Symbols": [
     { "Symbol": "BTCUSDT", "Markets": [ "Spot", "UsdFutures" ] },
     { "Symbol": "ETHUSDT", "Markets": [ "Spot", "UsdFutures" ] }
@@ -55,11 +56,13 @@ Tracked symbols and refresh settings live in `CryptoOrderBookDashboard/appsettin
 | Setting | Meaning |
 |---|---|
 | `DepthLevels` | Price levels shown per side when no size filter is active |
-| `UpdateThrottleMilliseconds` | How often the UI re-renders with fresh data (minimum 50 ms) |
+| `UpdateThrottleMilliseconds` | How often the UI checks for fresh data (minimum 50 ms) |
+| `MaxConcurrentHistoricalSearches` | Server-wide limit on historical searches running at once (default 2). Further searches wait in a queue. |
 | `Symbols[].Symbol` | Binance symbol, e.g. `BTCUSDT` |
+| `Symbols[].DisplayName` | Optional dropdown label. Defaults to the symbol without its quote asset (`BTCUSDT` → `BTC`). |
 | `Symbols[].Markets` | `Spot` and/or `UsdFutures`. An empty list means both. |
 
-> The symbol dropdowns in `Components/Pages/OrderBooks.razor` and `Trades.razor` are currently hard-coded. When you add a symbol to the config, add it there too.
+The symbol dropdowns are built from this list, so adding a symbol here is all it takes.
 
 ## How it works
 
@@ -68,13 +71,17 @@ Binance WebSocket / REST
    ├─ OrderBookHostedService ─► synchronized order books ─► OrderBookStore ─┐
    └─ TradeFeedHostedService ─► aggTrade stream + backfill ─► TradeStore ───┤
                                                                             │
-   Render pulse services (every UpdateThrottleMilliseconds) ─ Changed ──────┤
+   RenderPulseService (every UpdateThrottleMilliseconds) ─ Changed ─────────┤
                                                                             ▼
                               OrderBookPanel / TradeTapePanel (per browser circuit)
 ```
 
-Hosted background services own all exchange connections and write into singleton stores. UI components don't re-render on every exchange message. They re-read the stores on a fixed timer, which keeps SignalR traffic bounded no matter how busy the market is.
+Hosted background services own all exchange connections and write into singleton stores. UI components don't re-render on every exchange message. On each pulse they check a per-feed version number and re-render only if their data changed, which keeps SignalR traffic bounded no matter how busy the market is. The order book store copies each book at most once per change and shares that copy between all viewers.
 
 ## Disclaimer
 
 This is a personal project for market observation. It is not affiliated with Binance and is not financial advice.
+
+## License
+
+[MIT](LICENSE)
