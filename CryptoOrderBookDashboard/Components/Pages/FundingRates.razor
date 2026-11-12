@@ -1,0 +1,417 @@
+@page "/funding"
+@implements IDisposable
+@inject FundingStore Store
+@inject PositioningService Positioning
+
+<PageTitle>Funding Rates</PageTitle>
+
+<div class="funding-page">
+    @if (_summary is { } s)
+    {
+        <div class="funding-summary">
+            <div class="summary-card">
+                <div class="summary-label">Market sentiment</div>
+                <div class="summary-value sentiment-@SentimentClass(s.MedianSentiment)">@FundingMath.Label(s.MedianSentiment)</div>
+                <div class="summary-sub">median @DisplayFormat.SignedRate(s.MedianRate8h) / 8h</div>
+            </div>
+            <div class="summary-card">
+                <div class="summary-label">Longs paying above neutral</div>
+                <div class="summary-value">@DisplayFormat.Percent(s.AboveNeutralPct)%</div>
+                <div class="summary-sub">of @s.Count perpetuals</div>
+            </div>
+            <div class="summary-card">
+                <div class="summary-label">Negative funding</div>
+                <div class="summary-value">@DisplayFormat.Percent(s.NegativePct)%</div>
+                <div class="summary-sub">shorts paying longs</div>
+            </div>
+            <div class="summary-card">
+                <div class="summary-label">Extremes</div>
+                <div class="summary-value">@s.ExtremeLongs <span class="sentiment-strongbullish">▲</span> / @s.ExtremeShorts <span class="sentiment-strongbearish">▼</span></div>
+                <div class="summary-sub">longs / shorts crowded</div>
+            </div>
+        </div>
+    }
+
+    <div class="funding-controls">
+        <input type="search" class="form-control w-auto" placeholder="Search symbol…" @bind="_search" @bind:event="oninput" @bind:after="ApplyView" aria-label="Search symbol" />
+        <select class="form-select w-auto" @bind="_scope" @bind:after="ApplyView" aria-label="Scope">
+            <option value="all">All USDT perpetuals</option>
+            <option value="tracked">Tracked symbols only</option>
+        </select>
+        <div class="form-check mb-0">
+            <input id="extremesOnly" type="checkbox" class="form-check-input" @bind="_extremesOnly" @bind:after="ApplyView" />
+            <label for="extremesOnly" class="form-check-label">Extremes only</label>
+        </div>
+        <span class="funding-count">@_visible.Count shown</span>
+    </div>
+
+    @if (!Store.HistoryLoaded)
+    {
+        <div class="funding-notice">Loading 30 days of funding history for all perpetuals (about a minute after startup). Live rates are already shown.</div>
+    }
+
+    @if (_selected is { } sel)
+    {
+        <div class="funding-detail">
+            <div class="detail-header">
+                <span class="detail-title">@sel.DisplayName <span class="detail-symbol">@sel.Symbol perpetual</span></span>
+                <span class="sentiment-badge sentiment-@SentimentClass(sel.Sentiment)">@FundingMath.Label(sel.Sentiment)</span>
+                <button type="button" class="btn-close btn-close-white ms-auto" aria-label="Close" @onclick="() => Select(null)"></button>
+            </div>
+
+            <div class="detail-grid">
+                <div class="detail-section">
+                    <h3>Funding</h3>
+                    <dl>
+                        <dt>Estimated next</dt>
+                        <dd class="@RateClass(sel.Rate8h)">@DisplayFormat.SignedRate(sel.EstimatedRate) / @(sel.IntervalHours)h</dd>
+                        <dt>8h equivalent</dt>
+                        <dd>@DisplayFormat.SignedRate(sel.Rate8h)</dd>
+                        <dt>Annualized</dt>
+                        <dd>@DisplayFormat.SignedPercent(sel.AnnualizedPct)</dd>
+                        <dt>Next settlement</dt>
+                        <dd>@DisplayFormat.Countdown(sel.NextFundingTimeUtc - DateTime.UtcNow)</dd>
+                        <dt>Premium (mark vs index)</dt>
+                        <dd>@DisplayFormat.SignedPercent(sel.PremiumPct, 3)</dd>
+                        @if (sel.History is { LastSettledRate: { } lastRate, LastSettlementUtc: { } lastTime })
+                        {
+                            <dt>Last settled</dt>
+                            <dd>@DisplayFormat.SignedRate(lastRate) <span class="muted">at @lastTime.ToLocalTime().ToString("dd.MM. HH:mm")</span></dd>
+                        }
+                    </dl>
+                </div>
+
+                <div class="detail-section">
+                    <h3>Positioning</h3>
+                    @if (sel.Positioning is { } p)
+                    {
+                        <dl>
+                            <dt>Open interest</dt>
+                            <dd>@(sel.OpenInterestUsd is { } oiUsd ? DisplayFormat.CompactUsd(oiUsd) : "—")</dd>
+                            <dt>OI 24h change</dt>
+                            <dd class="@(p.OpenInterestChange24hPct >= 0 ? "pos" : "neg")">@(p.OpenInterestChange24hPct is { } oiChange ? DisplayFormat.SignedPercent(oiChange) : "—")</dd>
+                            <dt>Accounts long / short</dt>
+                            <dd>
+                                @if (p.GlobalLongAccountPct is { } longPct)
+                                {
+                                    <div class="ls-bar" title="Share of all accounts with a net long vs net short position">
+                                        <div class="ls-long" style="width:@DisplayFormat.Percent((double)longPct)%"></div>
+                                    </div>
+                                    <span>@DisplayFormat.Percent((double)longPct)% / @DisplayFormat.Percent(100 - (double)longPct)%</span>
+                                }
+                                else
+                                {
+                                    <span>—</span>
+                                }
+                            </dd>
+                            <dt>Top traders L/S (positions)</dt>
+                            <dd>@(p.TopTraderLongShortPositionRatio is { } top ? top.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture) : "—")</dd>
+                        </dl>
+                        <div class="muted small">Updated @p.FetchedUtc.ToLocalTime().ToString("HH:mm:ss"), refreshes every 5 min.</div>
+                    }
+                    else
+                    {
+                        <div class="muted">Loading open interest and long/short ratios…</div>
+                    }
+                </div>
+
+                <div class="detail-section detail-chart">
+                    <h3>Last 30 days (daily sum of settled funding)</h3>
+                    @if (sel.History is { } h)
+                    {
+                        <FundingBars Values="h.DailySums" Width="420" Height="110" ShowNeutral="true" ShowTooltips="true" AriaLabel="@($"Daily funding for {sel.Symbol}, last 30 days")" />
+                        <div class="chart-legend">
+                            <span>Dashed line = neutral (@DisplayFormat.SignedRate(FundingMath.NeutralDailyRate, 2)/day)</span>
+                            <span>30d total: <strong class="@RateClass(AveragePer8h(h.Cumulative))">@DisplayFormat.SignedRate(h.Cumulative, 3)</strong></span>
+                        </div>
+                        <div class="muted small">
+                            A $10,000 long held for the whole period would have @(h.Cumulative >= 0 ? "paid" : "received") about
+                            <strong>@DisplayFormat.Usd(Math.Abs(h.Cumulative) * 10_000m)</strong> USDT in funding.
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="muted">History not loaded yet.</div>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+
+    <div class="funding-table-wrap">
+        <table class="funding-table">
+            <thead>
+                <tr>
+                    <th>@SortHeader("Symbol", FundingSort.Symbol)</th>
+                    <th class="num">Mark</th>
+                    <th class="num">@SortHeader("Premium", FundingSort.Premium)</th>
+                    <th class="num">@SortHeader("Funding (est.)", FundingSort.Funding)</th>
+                    <th class="num">Annualized</th>
+                    <th class="num">Next in</th>
+                    <th class="num">@SortHeader("30d total", FundingSort.Cumulative)</th>
+                    <th>30d daily</th>
+                    <th class="num">@SortHeader("Open interest", FundingSort.OpenInterest)</th>
+                    <th>@SortHeader("Sentiment", FundingSort.Extreme)</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var row in _visible.Take(_rowLimit))
+                {
+                    <tr @key="row.Symbol" class="@RowClass(row)" @onclick="() => Select(row.Symbol)">
+                        <td class="symbol">
+                            @if (row.IsTracked)
+                            {
+                                <span class="tracked" title="Tracked symbol">★</span>
+                            }
+                            @row.DisplayName
+                        </td>
+                        <td class="num">@DisplayFormat.Number(row.MarkPrice)</td>
+                        <td class="num">@DisplayFormat.SignedPercent(row.PremiumPct, 3)</td>
+                        <td class="num @RateClass(row.Rate8h)">
+                            @DisplayFormat.SignedRate(row.EstimatedRate)
+                            @if (row.IntervalHours != FundingMath.DefaultIntervalHours)
+                            {
+                                <span class="interval">/@(row.IntervalHours)h</span>
+                            }
+                        </td>
+                        <td class="num">@DisplayFormat.SignedPercent(row.AnnualizedPct, 1)</td>
+                        <td class="num muted">@DisplayFormat.Countdown(row.NextFundingTimeUtc - _now)</td>
+                        <td class="num @(row.History is { } hc ? RateClass(AveragePer8h(hc.Cumulative)) : "")">@(row.History is { } hist ? DisplayFormat.SignedRate(hist.Cumulative, 3) : "—")</td>
+                        <td>
+                            @if (row.History is { } sparkline)
+                            {
+                                <FundingBars Values="sparkline.DailySums" />
+                            }
+                        </td>
+                        <td class="num">@(row.OpenInterestUsd is { } oi ? DisplayFormat.CompactUsd(oi) : "—")</td>
+                        <td><span class="sentiment-badge sentiment-@SentimentClass(row.Sentiment)">@FundingMath.Label(row.Sentiment)</span></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        @if (_visible.Count > _rowLimit)
+        {
+            <div class="funding-more">
+                <button type="button" class="btn btn-sm btn-outline-light" @onclick="() => _rowLimit += RowPageSize">
+                    Show @Math.Min(RowPageSize, _visible.Count - _rowLimit) more (@_rowLimit of @_visible.Count shown)
+                </button>
+            </div>
+        }
+    </div>
+
+    <details class="funding-help">
+        <summary>How to read funding rates</summary>
+        <ul>
+            <li><strong>Positive funding:</strong> longs pay shorts, because the perpetual trades above spot. Leveraged buyers are paying a premium to be long. <strong>Negative:</strong> shorts pay longs.</li>
+            <li><strong>Neutral is +0.01% per 8h, not 0%.</strong> USDT-M funding includes a fixed interest component, so +0.01%/8h is what gets charged when perp and spot are in line. Rates are normalized to 8h for comparison, because many symbols settle every 4h or 1h.</li>
+            <li>Funding shows how <em>aggressive</em> each side is, not how many traders are on it. Every long has a matching short, so open interest is always equal on both sides. Use the accounts long/short ratio for headcount.</li>
+            <li><strong>Extremes are often contrarian.</strong> Very high funding means crowded, expensive longs and a risk of a long squeeze. Deeply negative funding means crowded shorts and a risk of a short squeeze. This is most telling when open interest is rising at the same time.</li>
+            <li>The estimated rate keeps changing until settlement. The 30-day figures use only rates that were actually settled.</li>
+        </ul>
+    </details>
+</div>
+
+@code {
+    private enum FundingSort { Symbol, Premium, Funding, Cumulative, OpenInterest, Extreme }
+
+    private sealed record MarketSummary(
+        int Count,
+        decimal MedianRate8h,
+        FundingSentiment MedianSentiment,
+        double AboveNeutralPct,
+        double NegativePct,
+        int ExtremeLongs,
+        int ExtremeShorts);
+
+    // The countdowns tick every second; mark prices arrive about once a second anyway.
+    private const long RefreshMilliseconds = 1000;
+
+    // Rendering all ~900 perpetuals every second would mean a large diff per refresh for
+    // every viewer; the sort puts the interesting rows first, so show them in pages.
+    private const int RowPageSize = 100;
+    private int _rowLimit = RowPageSize;
+
+    private IReadOnlyList<FundingRow> _rows = [];
+    private List<FundingRow> _visible = [];
+    private MarketSummary? _summary;
+    private FundingRow? _selected;
+    private string? _selectedSymbol;
+    private DateTime _now = DateTime.UtcNow;
+
+    private string _search = string.Empty;
+    private string _scope = "all";
+    private bool _extremesOnly;
+    private FundingSort _sort = FundingSort.Extreme;
+    private bool _descending = true;
+
+    private long _lastRefreshTicks;
+    private bool _disposed;
+
+    // Lets a symbol's detail be linked directly, e.g. /funding?symbol=BTCUSDT.
+    [SupplyParameterFromQuery(Name = "symbol")]
+    public string? InitialSymbol { get; set; }
+
+    protected override void OnInitialized()
+    {
+        if (!string.IsNullOrWhiteSpace(InitialSymbol))
+        {
+            Select(InitialSymbol.Trim().ToUpperInvariant());
+        }
+
+        Refresh();
+        Store.Changed += OnStoreChanged;
+    }
+
+    // async void because it's an event handler - every exception must be caught here, since
+    // one escaping onto the thread pool would take down the whole process.
+    private async void OnStoreChanged()
+    {
+        if (_disposed || Environment.TickCount64 - Volatile.Read(ref _lastRefreshTicks) < RefreshMilliseconds)
+        {
+            return;
+        }
+
+        try
+        {
+            await InvokeAsync(() =>
+            {
+                Refresh();
+                StateHasChanged();
+            });
+        }
+        catch (ObjectDisposedException)
+        {
+            // Circuit was torn down between the pulse and this render.
+        }
+        catch (Exception ex)
+        {
+            await DispatchExceptionAsync(ex);
+        }
+    }
+
+    private void Refresh()
+    {
+        Volatile.Write(ref _lastRefreshTicks, Environment.TickCount64);
+        _now = DateTime.UtcNow;
+        _rows = Store.GetRows();
+        _summary = Summarize(_rows);
+        ApplyView();
+    }
+
+    private void ApplyView()
+    {
+        IEnumerable<FundingRow> query = _rows;
+
+        if (_scope == "tracked")
+        {
+            query = query.Where(r => r.IsTracked);
+        }
+
+        if (_extremesOnly)
+        {
+            query = query.Where(r => FundingMath.IsExtreme(r.Sentiment));
+        }
+
+        if (!string.IsNullOrWhiteSpace(_search))
+        {
+            var term = _search.Trim();
+            query = query.Where(r => r.Symbol.Contains(term, StringComparison.OrdinalIgnoreCase));
+        }
+
+        IOrderedEnumerable<FundingRow> ordered = (_sort, _descending) switch
+        {
+            (FundingSort.Symbol, false) => query.OrderBy(r => r.Symbol),
+            (FundingSort.Symbol, true) => query.OrderByDescending(r => r.Symbol),
+            (FundingSort.Premium, false) => query.OrderBy(r => r.PremiumPct),
+            (FundingSort.Premium, true) => query.OrderByDescending(r => r.PremiumPct),
+            (FundingSort.Funding, false) => query.OrderBy(r => r.Rate8h),
+            (FundingSort.Funding, true) => query.OrderByDescending(r => r.Rate8h),
+            // Symbols without history (or OI) always sink to the bottom.
+            (FundingSort.Cumulative, false) => query.OrderBy(r => r.History is null).ThenBy(r => r.History?.Cumulative),
+            (FundingSort.Cumulative, true) => query.OrderBy(r => r.History is null).ThenByDescending(r => r.History?.Cumulative),
+            (FundingSort.OpenInterest, false) => query.OrderBy(r => r.OpenInterestUsd is null).ThenBy(r => r.OpenInterestUsd),
+            (FundingSort.OpenInterest, true) => query.OrderBy(r => r.OpenInterestUsd is null).ThenByDescending(r => r.OpenInterestUsd),
+            (FundingSort.Extreme, false) => query.OrderBy(r => r.DistanceFromNeutral),
+            _ => query.OrderByDescending(r => r.DistanceFromNeutral),
+        };
+
+        _visible = ordered.ThenBy(r => r.Symbol).ToList();
+        _selected = _selectedSymbol is null ? null : _rows.FirstOrDefault(r => r.Symbol == _selectedSymbol);
+    }
+
+    private void SortBy(FundingSort sort)
+    {
+        if (_sort == sort)
+        {
+            _descending = !_descending;
+        }
+        else
+        {
+            _sort = sort;
+            _descending = sort != FundingSort.Symbol;
+        }
+
+        ApplyView();
+    }
+
+    private void Select(string? symbol)
+    {
+        _selectedSymbol = symbol == _selectedSymbol ? null : symbol;
+        _selected = _selectedSymbol is null ? null : _rows.FirstOrDefault(r => r.Symbol == _selectedSymbol);
+
+        if (_selectedSymbol is not null)
+        {
+            // Lands in the store; picked up on a following pulse.
+            _ = Positioning.EnsureFreshAsync(_selectedSymbol);
+        }
+    }
+
+    private static MarketSummary? Summarize(IReadOnlyList<FundingRow> rows)
+    {
+        if (rows.Count == 0)
+        {
+            return null;
+        }
+
+        var sorted = rows.Select(r => r.Rate8h).Order().ToList();
+        var median = sorted[sorted.Count / 2];
+
+        return new MarketSummary(
+            rows.Count,
+            median,
+            FundingMath.Classify(median),
+            100.0 * rows.Count(r => r.Sentiment is FundingSentiment.Bullish or FundingSentiment.StrongBullish) / rows.Count,
+            100.0 * rows.Count(r => r.Rate8h < 0) / rows.Count,
+            rows.Count(r => r.Sentiment == FundingSentiment.StrongBullish),
+            rows.Count(r => r.Sentiment == FundingSentiment.StrongBearish));
+    }
+
+    private RenderFragment SortHeader(string label, FundingSort sort) =>
+        @<button type="button" class="sort-header @(_sort == sort ? "active" : "")" @onclick="() => SortBy(sort)">
+            @label @(_sort == sort ? (_descending ? "▼" : "▲") : "")
+        </button>;
+
+    private string RowClass(FundingRow row)
+    {
+        var css = FundingMath.IsExtreme(row.Sentiment) ? "extreme" : "";
+        return row.Symbol == _selectedSymbol ? css + " selected" : css;
+    }
+
+    private static string RateClass(decimal rate8h) => FundingMath.Classify(rate8h) switch
+    {
+        FundingSentiment.StrongBullish or FundingSentiment.Bullish => "pos",
+        FundingSentiment.StrongBearish or FundingSentiment.Bearish => "neg",
+        _ => "",
+    };
+
+    // A window total spread over its 8h periods, so it can be classified like a single rate.
+    private static decimal AveragePer8h(decimal cumulative) => cumulative / (FundingStore.HistoryDays * 3m);
+
+    private static string SentimentClass(FundingSentiment sentiment) => sentiment.ToString().ToLowerInvariant();
+
+    public void Dispose()
+    {
+        _disposed = true;
+        Store.Changed -= OnStoreChanged;
+    }
+}

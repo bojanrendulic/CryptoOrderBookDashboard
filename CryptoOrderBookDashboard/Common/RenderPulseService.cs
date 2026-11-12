@@ -1,3 +1,4 @@
+using CryptoOrderBookDashboard.Funding;
 using CryptoOrderBookDashboard.OrderBooks;
 using CryptoOrderBookDashboard.OrderBooks.Configuration;
 using CryptoOrderBookDashboard.Trades;
@@ -6,11 +7,12 @@ using Microsoft.Extensions.Options;
 namespace CryptoOrderBookDashboard.Common;
 
 // Drives UI refreshes at a fixed rate instead of per exchange message. Each panel compares
-// its store's per-key version on every pulse and only re-renders when its data changed.
+// its store's version on every pulse and only re-renders when its data changed.
 public sealed class RenderPulseService(
     IOptions<OrderBookDashboardOptions> options,
     OrderBookStore orderBookStore,
-    TradeStore tradeStore) : BackgroundService
+    TradeStore tradeStore,
+    FundingStore fundingStore) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -21,6 +23,7 @@ public sealed class RenderPulseService(
         {
             orderBookStore.RaiseChanged();
             tradeStore.RaiseChanged();
+            fundingStore.RaiseChanged();
         }
     }
 }

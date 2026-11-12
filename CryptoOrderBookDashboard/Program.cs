@@ -1,5 +1,6 @@
 using CryptoOrderBookDashboard.Common;
 using CryptoOrderBookDashboard.Components;
+using CryptoOrderBookDashboard.Funding;
 using CryptoOrderBookDashboard.OrderBooks;
 using CryptoOrderBookDashboard.OrderBooks.Configuration;
 using CryptoOrderBookDashboard.Trades;
@@ -17,6 +18,13 @@ builder.Services.AddSingleton<OrderBookStore>();
 builder.Services.AddHostedService<OrderBookHostedService>();
 builder.Services.AddSingleton<TradeStore>();
 builder.Services.AddHostedService<TradeFeedHostedService>();
+builder.Services.AddSingleton<FundingStore>();
+builder.Services.AddHostedService<FundingRateHostedService>();
+
+// Singleton + hosted: the page calls it for on-demand fetches, the host runs its refresh loop.
+builder.Services.AddSingleton<PositioningService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<PositioningService>());
+
 builder.Services.AddHostedService<RenderPulseService>();
 
 // Singleton so its concurrency limit applies across all users/circuits.

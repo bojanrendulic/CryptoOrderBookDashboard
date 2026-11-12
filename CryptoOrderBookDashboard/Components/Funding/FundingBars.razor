@@ -1,0 +1,68 @@
+@using System.Globalization
+
+@* Daily funding sums as up/down bars around a zero line, with an optional dashed line at the
+   neutral daily rate. Plain SVG - no charting library needed. *@
+<svg class="funding-bars @Class" viewBox="0 0 @F(Width) @F(Height)" width="@F(Width)" height="@F(Height)"
+     role="img" aria-label="@AriaLabel" preserveAspectRatio="none">
+    <line class="zero-line" x1="0" x2="@F(Width)" y1="@F(Mid)" y2="@F(Mid)" />
+    @if (ShowNeutral)
+    {
+        var y = Mid - Scale(FundingMath.NeutralDailyRate);
+        <line class="neutral-line" x1="0" x2="@F(Width)" y1="@F(y)" y2="@F(y)" />
+    }
+    @for (var i = 0; i < Values.Count; i++)
+    {
+        var value = Values[i];
+        var h = Math.Abs(Scale(value));
+        var x = i * BarWidth;
+        var y = value >= 0 ? Mid - h : Mid;
+        <rect class="@(value >= 0 ? "bar-pos" : "bar-neg")" x="@F(x + Gap / 2)" y="@F(y)" width="@F(Math.Max(1, BarWidth - Gap))" height="@F(Math.Max(h, value == 0 ? 0 : 0.5))">
+            @if (ShowTooltips)
+            {
+                <title>@DayLabel(i): @DisplayFormat.SignedRate(value, 3)</title>
+            }
+        </rect>
+    }
+</svg>
+
+@code {
+    [Parameter, EditorRequired]
+    public IReadOnlyList<decimal> Values { get; set; } = [];
+
+    [Parameter]
+    public double Width { get; set; } = 90;
+
+    [Parameter]
+    public double Height { get; set; } = 22;
+
+    [Parameter]
+    public bool ShowNeutral { get; set; }
+
+    [Parameter]
+    public bool ShowTooltips { get; set; }
+
+    [Parameter]
+    public string? Class { get; set; }
+
+    [Parameter]
+    public string AriaLabel { get; set; } = "Daily funding";
+
+    private double Mid => Height / 2;
+
+    private double BarWidth => Values.Count == 0 ? Width : Width / Values.Count;
+
+    private double Gap => BarWidth > 4 ? 1 : 0;
+
+    // Symmetric scale so positive and negative bars are comparable; never smaller than the
+    // neutral rate, so a flat-neutral symbol doesn't get blown up into dramatic bars.
+    private decimal MaxAbs => Values.Count == 0
+        ? FundingMath.NeutralDailyRate
+        : Math.Max(Values.Max(Math.Abs), FundingMath.NeutralDailyRate) * 1.1m;
+
+    private double Scale(decimal value) => (double)(value / MaxAbs) * Mid;
+
+    private string DayLabel(int index) =>
+        DateTime.UtcNow.Date.AddDays(index - (Values.Count - 1)).ToString("dd.MM.", CultureInfo.InvariantCulture);
+
+    private static string F(double value) => value.ToString("0.##", CultureInfo.InvariantCulture);
+}

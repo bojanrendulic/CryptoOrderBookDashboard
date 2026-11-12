@@ -10,6 +10,7 @@ It streams live market data over WebSockets, keeps fully synchronized local orde
 - **Size filter**: show only resting orders in a chosen notional range, from under $10k up to $100M+. Rows are colour-coded by size tier.
 - **Trade tape**: live aggregated trades with buy/sell coloring, plus buy volume, sell volume and delta over the last 60 seconds.
 - **Historical large-trade search**: when no recent trade matches the selected size range, search the last 7 or 30 days. Hourly volume is used to skip hours that can't contain a qualifying trade. The search reports progress, can be cancelled, and states clearly when its results are incomplete (rate limits, time cap, very busy hours). A server-wide limit caps concurrent searches so they can't exhaust the Binance rate limit the live feeds rely on.
+- **Funding rates** (`/funding`) for all ~900 USDT-M perpetuals. Shows the live estimated rate (normalized to 8h, since many symbols settle every 4h or 1h), annualized rate, mark vs index premium, a countdown to settlement and 30 days of settled history with daily bars. Each row carries a sentiment label measured against the real neutral rate of +0.01%/8h, and extremes (crowded longs or shorts) are highlighted. A market-wide summary shows the median funding and how many perpetuals are crowded on each side. Selecting a symbol adds open interest with its 24h change, the long/short account ratio and the top traders' position ratio. Direct link: `/funding?symbol=BTCUSDT`.
 - **Spot and Futures side by side** for every tracked symbol.
 - Public market data only. **No API keys required.**
 
@@ -69,7 +70,9 @@ The symbol dropdowns are built from this list, so adding a symbol here is all it
 ```
 Binance WebSocket / REST
    ├─ OrderBookHostedService ─► synchronized order books ─► OrderBookStore ─┐
-   └─ TradeFeedHostedService ─► aggTrade stream + backfill ─► TradeStore ───┤
+   ├─ TradeFeedHostedService ─► aggTrade stream + backfill ─► TradeStore ───┤
+   ├─ FundingRateHostedService ─► !markPrice@arr + funding history ─┐       │
+   └─ PositioningService ─► open interest, long/short ratios ───────┴► FundingStore
                                                                             │
    RenderPulseService (every UpdateThrottleMilliseconds) ─ Changed ─────────┤
                                                                             ▼

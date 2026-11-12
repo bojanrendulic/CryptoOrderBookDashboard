@@ -1,0 +1,339 @@
+.funding-page {
+    color: #eee;
+}
+
+.funding-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+.summary-card,
+.funding-detail,
+.funding-table-wrap,
+.funding-help {
+    border: 1px solid #333;
+    border-radius: 6px;
+    background-color: #111;
+}
+
+.summary-card {
+    padding: 0.6rem 0.8rem;
+}
+
+.summary-label {
+    color: #999;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.summary-value {
+    font-size: 1.35rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.summary-sub {
+    color: #888;
+    font-size: 0.8rem;
+}
+
+.funding-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+    color: #222;
+}
+
+.funding-count {
+    color: #888;
+    font-size: 0.85rem;
+}
+
+.funding-notice {
+    margin-bottom: 0.75rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: 6px;
+    background-color: #3a3214;
+    color: #f2e3b6;
+    font-size: 0.85rem;
+}
+
+/* Detail panel */
+
+.funding-detail {
+    padding: 0.75rem 1rem;
+    margin-bottom: 1rem;
+}
+
+.detail-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.5rem;
+}
+
+.detail-title {
+    font-size: 1.15rem;
+    font-weight: 600;
+}
+
+.detail-symbol {
+    color: #888;
+    font-weight: 400;
+    font-size: 0.85rem;
+}
+
+.detail-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 1rem 1.5rem;
+}
+
+.detail-section h3 {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #999;
+    margin-bottom: 0.4rem;
+}
+
+.detail-section dl {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.2rem 1rem;
+    margin: 0 0 0.4rem;
+    font-size: 0.9rem;
+}
+
+.detail-section dt {
+    color: #aaa;
+    font-weight: 400;
+}
+
+.detail-section dd {
+    margin: 0;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.detail-chart {
+    min-width: 0;
+}
+
+.detail-chart ::deep .funding-bars {
+    width: 100%;
+    max-width: 420px;
+}
+
+.chart-legend {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    max-width: 420px;
+    margin: 0.35rem 0;
+    font-size: 0.8rem;
+    color: #aaa;
+}
+
+.ls-bar {
+    display: inline-block;
+    vertical-align: middle;
+    width: 80px;
+    height: 8px;
+    margin-right: 0.4rem;
+    border-radius: 4px;
+    overflow: hidden;
+    background-color: #ff5252;
+}
+
+.ls-long {
+    height: 100%;
+    background-color: #4caf50;
+}
+
+/* Table */
+
+.funding-table-wrap {
+    max-height: calc(100vh - 280px);
+    min-height: 300px;
+    overflow: auto;
+}
+
+.funding-more {
+    padding: 0.6rem;
+    text-align: center;
+}
+
+.funding-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: "Consolas", "Courier New", monospace;
+    font-size: 0.83rem;
+}
+
+.funding-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background-color: #1a1a1a;
+    color: #aaa;
+    font-weight: 500;
+    white-space: nowrap;
+    padding: 0.4rem 0.6rem;
+    border-bottom: 1px solid #333;
+    text-align: left;
+}
+
+.funding-table td {
+    height: 35px;
+    padding: 0 0.6rem;
+    border-bottom: 1px solid #1e1e1e;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+.funding-table .num {
+    text-align: right;
+}
+
+.funding-table thead th.num .sort-header {
+    width: 100%;
+    text-align: right;
+}
+
+.funding-table tbody tr {
+    cursor: pointer;
+}
+
+.funding-table tbody tr:hover {
+    background-color: #1b1b1b;
+}
+
+.funding-table tbody tr.extreme {
+    background-color: #1f1a10;
+}
+
+.funding-table tbody tr.selected {
+    background-color: #17263a;
+}
+
+.symbol {
+    font-weight: 600;
+}
+
+.tracked {
+    color: #f2c94c;
+    margin-right: 0.25rem;
+}
+
+.interval {
+    color: #888;
+    font-size: 0.75rem;
+}
+
+.sort-header {
+    background: none;
+    border: 0;
+    padding: 0;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.sort-header:hover,
+.sort-header.active {
+    color: #fff;
+}
+
+/* Shared colors */
+
+.pos {
+    color: #4caf50;
+}
+
+.neg {
+    color: #ff6b6b;
+}
+
+.muted {
+    color: #888;
+}
+
+.sentiment-badge {
+    display: inline-block;
+    padding: 0.1rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-family: system-ui, sans-serif;
+    white-space: nowrap;
+}
+
+.sentiment-badge.sentiment-strongbearish {
+    background-color: #5b1e1e;
+    color: #ffb4b4;
+}
+
+.sentiment-badge.sentiment-bearish {
+    background-color: #3d2222;
+    color: #f2b6b6;
+}
+
+.sentiment-badge.sentiment-neutral {
+    background-color: #2a2a2a;
+    color: #ccc;
+}
+
+.sentiment-badge.sentiment-bullish {
+    background-color: #1e3b26;
+    color: #b6f2c1;
+}
+
+.sentiment-badge.sentiment-strongbullish {
+    background-color: #5a3a10;
+    color: #ffd59a;
+}
+
+.summary-value.sentiment-strongbearish,
+span.sentiment-strongbearish {
+    color: #ff6b6b;
+}
+
+.summary-value.sentiment-bearish {
+    color: #f2a0a0;
+}
+
+.summary-value.sentiment-bullish {
+    color: #4caf50;
+}
+
+.summary-value.sentiment-strongbullish,
+span.sentiment-strongbullish {
+    color: #ffb347;
+}
+
+.funding-help {
+    margin-top: 1rem;
+    padding: 0.6rem 1rem;
+    font-size: 0.88rem;
+    color: #ccc;
+}
+
+.funding-help summary {
+    cursor: pointer;
+    color: #eee;
+}
+
+.funding-help ul {
+    margin: 0.5rem 0 0;
+    padding-left: 1.2rem;
+}
+
+.funding-help li {
+    margin-bottom: 0.35rem;
+}

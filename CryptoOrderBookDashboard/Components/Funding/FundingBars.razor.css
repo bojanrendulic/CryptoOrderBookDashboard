@@ -1,0 +1,23 @@
+.funding-bars {
+    display: block;
+    overflow: visible;
+}
+
+.zero-line {
+    stroke: #555;
+    stroke-width: 1;
+}
+
+.neutral-line {
+    stroke: #888;
+    stroke-width: 1;
+    stroke-dasharray: 3 3;
+}
+
+.bar-pos {
+    fill: #4caf50;
+}
+
+.bar-neg {
+    fill: #ff5252;
+}
