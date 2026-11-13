@@ -13,7 +13,14 @@ public sealed class OrderBookStore
         PriceLevel[] Bids,
         PriceLevel[] Asks,
         OrderBookFeedStatus Status,
-        DateTime UpdateTimeUtc);
+        DateTime UpdateTimeUtc)
+    {
+        // Grouped views and depth sums derived from this version, keyed by step / percent and
+        // shared by all viewers like the copy itself.
+        public ConcurrentDictionary<decimal, (PriceLevel[] Bids, PriceLevel[] Asks)> Grouped { get; } = new();
+
+        public ConcurrentDictionary<decimal, DepthSummary> Depths { get; } = new();
+    }
 
     private sealed class Entry(ISymbolOrderBook book)
     {
@@ -53,7 +60,9 @@ public sealed class OrderBookStore
         OrderBookKey key,
         int levels,
         decimal? minNotionalUsd = null,
-        decimal? maxNotionalUsd = null)
+        decimal? maxNotionalUsd = null,
+        decimal? groupPercent = null,
+        decimal? depthPercent = null)
     {
         if (!_books.TryGetValue(key, out var entry))
         {
@@ -62,34 +71,118 @@ public sealed class OrderBookStore
 
         var book = GetOrBuildCache(entry);
 
+        decimal? bestBid = book.Bids.Length > 0 ? book.Bids[0].Price : null;
+        decimal? bestAsk = book.Asks.Length > 0 ? book.Asks[0].Price : null;
+        decimal? mid = bestBid is not null && bestAsk is not null ? (bestBid + bestAsk) / 2 : null;
+
+        var sourceBids = book.Bids;
+        var sourceAsks = book.Asks;
+        decimal? groupStep = null;
+
+        if (groupPercent is > 0 && mid is not null)
+        {
+            var step = PriceGrouping.NiceStep(mid.Value * groupPercent.Value / 100m);
+            if (step > 0)
+            {
+                groupStep = step;
+                (sourceBids, sourceAsks) = book.Grouped.GetOrAdd(
+                    step,
+                    s => (Group(book.Bids, s, roundUp: false), Group(book.Asks, s, roundUp: true)));
+            }
+        }
+
         List<PriceLevel> bids;
         List<PriceLevel> asks;
 
         if (minNotionalUsd is not null || maxNotionalUsd is not null)
         {
-            bids = book.Bids
+            bids = sourceBids
                 .Where(l => Notional.InRange(l.Price * l.Quantity, minNotionalUsd, maxNotionalUsd))
                 .Take(MaxFilteredRows)
                 .ToList();
 
-            asks = book.Asks
+            asks = sourceAsks
                 .Where(l => Notional.InRange(l.Price * l.Quantity, minNotionalUsd, maxNotionalUsd))
                 .Take(MaxFilteredRows)
                 .ToList();
         }
         else
         {
-            bids = book.Bids.Take(levels).ToList();
-            asks = book.Asks.Take(levels).ToList();
+            bids = sourceBids.Take(levels).ToList();
+            asks = sourceAsks.Take(levels).ToList();
+        }
+
+        DepthSummary? depth = null;
+        if (depthPercent is > 0 && mid is not null)
+        {
+            depth = book.Depths.GetOrAdd(depthPercent.Value, p => ComputeDepth(book, mid.Value, p));
         }
 
         return new OrderBookSnapshot(
             bids,
             asks,
-            book.Bids.Length > 0 ? book.Bids[0].Price : null,
-            book.Asks.Length > 0 ? book.Asks[0].Price : null,
+            bestBid,
+            bestAsk,
+            groupStep,
+            depth,
             book.Status,
             book.UpdateTimeUtc);
+    }
+
+    // Merges levels into price buckets of `step`. Bids round down and asks round up (as on
+    // Binance), so a bucket never crosses the spread. Input is best-first, so equal buckets
+    // are always adjacent.
+    private static PriceLevel[] Group(PriceLevel[] levels, decimal step, bool roundUp)
+    {
+        var result = new List<PriceLevel>();
+        foreach (var level in levels)
+        {
+            var bucket = (roundUp ? Math.Ceiling(level.Price / step) : Math.Floor(level.Price / step)) * step;
+            if (result.Count > 0 && result[^1].Price == bucket)
+            {
+                result[^1] = result[^1] with { Quantity = result[^1].Quantity + level.Quantity };
+            }
+            else
+            {
+                result.Add(new PriceLevel(bucket, level.Quantity));
+            }
+        }
+
+        return result.ToArray();
+    }
+
+    private static DepthSummary ComputeDepth(CachedBook book, decimal mid, decimal percent)
+    {
+        var lowerBound = mid * (1 - percent / 100m);
+        var upperBound = mid * (1 + percent / 100m);
+
+        var bidsUsd = 0m;
+        foreach (var level in book.Bids)
+        {
+            if (level.Price < lowerBound)
+            {
+                break;
+            }
+
+            bidsUsd += level.Price * level.Quantity;
+        }
+
+        var asksUsd = 0m;
+        foreach (var level in book.Asks)
+        {
+            if (level.Price > upperBound)
+            {
+                break;
+            }
+
+            asksUsd += level.Price * level.Quantity;
+        }
+
+        // The sums are only complete if the local book reaches past the band on both sides.
+        var complete = book.Bids.Length > 0 && book.Bids[^1].Price < lowerBound
+            && book.Asks.Length > 0 && book.Asks[^1].Price > upperBound;
+
+        return new DepthSummary(percent, bidsUsd, asksUsd, complete);
     }
 
     // book.Book copies the whole (full-depth) book under the library's lock. Doing that per

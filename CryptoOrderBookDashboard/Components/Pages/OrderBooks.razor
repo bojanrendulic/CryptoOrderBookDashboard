@@ -4,7 +4,26 @@
 
 <PageTitle>Order Books</PageTitle>
 
-<MarketFilterBar IdPrefix="orderbook" SizeLabel="Order size" @bind-Symbol="_selectedSymbol" @bind-Range="_selectedRange" />
+<MarketFilterBar IdPrefix="orderbook" SizeLabel="Min size" Presets="NotionalRange.MinimumPresets"
+                 @bind-Symbol="_selectedSymbol" @bind-Range="_selectedRange">
+    <label for="orderbook-group" class="mb-0 ms-2">Group:</label>
+    <select id="orderbook-group" class="form-select w-auto" value="@_grouping.Key"
+            @onchange="e => _grouping = PriceGrouping.FromKey(e.Value?.ToString())">
+        @foreach (var grouping in PriceGrouping.Presets)
+        {
+            <option value="@grouping.Key">@grouping.Label</option>
+        }
+    </select>
+
+    <label for="orderbook-depth" class="mb-0 ms-2">Depth:</label>
+    <select id="orderbook-depth" class="form-select w-auto" value="@_depth.Key"
+            @onchange="e => _depth = DepthBand.FromKey(e.Value?.ToString())">
+        @foreach (var band in DepthBand.Presets)
+        {
+            <option value="@band.Key">@band.Label</option>
+        }
+    </select>
+</MarketFilterBar>
 
 @{
     var tracked = Options.Value.FindSymbol(_selectedSymbol);
@@ -15,7 +34,9 @@
         @foreach (var market in tracked.GetMarkets())
         {
             <div class="col-md-6">
-                <OrderBookPanel Market="@market" Symbol="@tracked.Symbol" MinNotionalUsd="_selectedRange.Min" MaxNotionalUsd="_selectedRange.Max" />
+                <OrderBookPanel Market="@market" Symbol="@tracked.Symbol"
+                                MinNotionalUsd="_selectedRange.Min" MaxNotionalUsd="_selectedRange.Max"
+                                GroupPercent="_grouping.Percent" DepthPercent="_depth.Percent" />
             </div>
         }
     </div>
@@ -27,7 +48,9 @@ else
 
 @code {
     private string _selectedSymbol = string.Empty;
-    private NotionalRange _selectedRange = NotionalRange.Default;
+    private NotionalRange _selectedRange = NotionalRange.MinimumPresets[0];
+    private PriceGrouping _grouping = PriceGrouping.Default;
+    private DepthBand _depth = DepthBand.Default;
 
     protected override void OnInitialized() =>
         _selectedSymbol = Options.Value.Symbols.FirstOrDefault()?.Symbol ?? string.Empty;

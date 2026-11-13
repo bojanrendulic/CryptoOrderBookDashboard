@@ -1,6 +1,7 @@
 @inject IOptions<OrderBookDashboardOptions> Options
 
-@* Symbol + notional range selectors shared by the Order Book and Trades pages.
+@* Symbol + notional range selectors shared by the Order Book and Trades pages; pages can
+   append their own controls as child content.
    Symbols come from configuration, so adding one to appsettings.json is enough. *@
 <div class="d-flex align-items-center gap-2 mb-4">
     <label for="@($"{IdPrefix}-symbol")" class="mb-0">Symbol:</label>
@@ -13,11 +14,13 @@
 
     <label for="@($"{IdPrefix}-size")" class="mb-0">@SizeLabel:</label>
     <select id="@($"{IdPrefix}-size")" class="form-select w-auto" value="@Range.Key" @onchange="OnRangeChangedAsync">
-        @foreach (var range in NotionalRange.Presets)
+        @foreach (var range in Presets)
         {
             <option value="@range.Key">@range.Label</option>
         }
     </select>
+
+    @ChildContent
 </div>
 
 @code {
@@ -39,9 +42,15 @@
     [Parameter]
     public EventCallback<NotionalRange> RangeChanged { get; set; }
 
+    [Parameter]
+    public IReadOnlyList<NotionalRange> Presets { get; set; } = NotionalRange.Presets;
+
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
     private Task OnSymbolChangedAsync(ChangeEventArgs e) =>
         SymbolChanged.InvokeAsync(e.Value?.ToString() ?? string.Empty);
 
     private Task OnRangeChangedAsync(ChangeEventArgs e) =>
-        RangeChanged.InvokeAsync(NotionalRange.FromKey(e.Value?.ToString()));
+        RangeChanged.InvokeAsync(NotionalRange.FromKey(e.Value?.ToString(), Presets));
 }

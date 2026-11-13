@@ -17,10 +17,24 @@ public sealed record NotionalRange(string Key, string Label, decimal? Min, decim
         new("100m+", "$100M+", 100_000_000m, null),
     ];
 
+    // Order book rows are "walls", so the order book filters by minimum size only.
+    public static readonly IReadOnlyList<NotionalRange> MinimumPresets =
+    [
+        new("all", "All", null, null),
+        new("10k+", "≥ $10k", 10_000m, null),
+        new("100k+", "≥ $100k", 100_000m, null),
+        new("1m+", "≥ $1M", 1_000_000m, null),
+        new("5m+", "≥ $5M", 5_000_000m, null),
+        new("25m+", "≥ $25M", 25_000_000m, null),
+        new("50m+", "≥ $50M", 50_000_000m, null),
+    ];
+
     public static NotionalRange Default => Presets[0];
 
-    public static NotionalRange FromKey(string? key) =>
-        Presets.FirstOrDefault(r => r.Key == key) ?? Default;
+    public static NotionalRange FromKey(string? key) => FromKey(key, Presets);
+
+    public static NotionalRange FromKey(string? key, IReadOnlyList<NotionalRange> presets) =>
+        presets.FirstOrDefault(r => r.Key == key) ?? presets[0];
 }
 
 public static class Notional

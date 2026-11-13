@@ -16,7 +16,26 @@
             <span>Spread: @FormatNumber(bestAsk - bestBid)</span>
             <span>Mid: @FormatNumber(mid)</span>
         }
+        @if (_snapshot.GroupStep is { } step)
+        {
+            <span>Group: @FormatNumber(step)</span>
+        }
     </div>
+
+    @if (_snapshot.Depth is { } depth)
+    {
+        var bidPct = (double)(depth.BidShare * 100);
+        var prefix = depth.Complete ? "" : "≥ ";
+        <div class="depth-summary" title="@DepthTitle(depth)">
+            <span class="depth-label">Depth @($"±{depth.Percent:0.#}%")</span>
+            <span class="depth-bids">@prefix@FormatNotional(depth.BidsUsd)</span>
+            <div class="depth-imbalance">
+                <div class="depth-imbalance-bids" style="width:@(FormatPercent(bidPct))%"></div>
+            </div>
+            <span class="depth-asks">@prefix@FormatNotional(depth.AsksUsd)</span>
+            <span class="depth-share">@($"{bidPct:0}% / {100 - bidPct:0}%")</span>
+        </div>
+    }
 
     @if ((MinNotionalUsd is not null || MaxNotionalUsd is not null) && _snapshot.Bids.Count == 0 && _snapshot.Asks.Count == 0)
     {
@@ -78,6 +97,14 @@
     [Parameter]
     public decimal? MaxNotionalUsd { get; set; }
 
+    // Price bucket as a percentage of mid; null = no grouping.
+    [Parameter]
+    public decimal? GroupPercent { get; set; }
+
+    // Band around mid for the bid/ask depth summary; null = hidden.
+    [Parameter]
+    public decimal? DepthPercent { get; set; }
+
     private OrderBookSnapshot _snapshot = OrderBookSnapshot.Empty;
     private ElementReference _spreadMarker;
     private IJSObjectReference? _module;
@@ -91,7 +118,7 @@
 
     private string MarketLabel => DisplayFormat.MarketLabel(Market);
 
-    private string CenterKey => $"{Market}:{Symbol}:{MinNotionalUsd}:{MaxNotionalUsd}";
+    private string CenterKey => $"{Market}:{Symbol}:{MinNotionalUsd}:{MaxNotionalUsd}:{GroupPercent}";
 
     protected override void OnInitialized()
     {
@@ -159,7 +186,7 @@
         // Version first: if the book changes while the snapshot is being built, the next pulse
         // sees a newer version and refreshes again rather than missing the update.
         Volatile.Write(ref _renderedVersion, Store.GetVersion(_key));
-        _snapshot = Store.GetSnapshot(_key, levels, MinNotionalUsd, MaxNotionalUsd);
+        _snapshot = Store.GetSnapshot(_key, levels, MinNotionalUsd, MaxNotionalUsd, GroupPercent, DepthPercent);
     }
 
     private static int SizeTier(decimal notionalUsd) => Notional.SizeTier(notionalUsd);
@@ -169,6 +196,10 @@
     private static string FormatQuantity(decimal value) => DisplayFormat.Quantity(value);
 
     private static string FormatNotional(decimal value) => DisplayFormat.CompactUsd(value);
+
+    private static string DepthTitle(DepthSummary depth) =>
+        $"Resting bid and ask liquidity within ±{depth.Percent:0.#}% of mid."
+        + (depth.Complete ? "" : " The local book does not reach the edge of this band, so these are lower bounds.");
 
     private static string FormatPercent(double value) => DisplayFormat.Percent(value);
 

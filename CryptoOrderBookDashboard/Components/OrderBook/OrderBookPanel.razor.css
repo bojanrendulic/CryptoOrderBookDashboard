@@ -170,3 +170,32 @@
 .bids .price {
     color: #4caf50;
 }
+
+.depth-summary {
+    display: grid;
+    grid-template-columns: auto auto 1fr auto auto;
+    align-items: center;
+    column-gap: 0.6rem;
+    margin-bottom: 0.5rem;
+    color: #999;
+}
+
+.depth-bids {
+    color: #4caf50;
+}
+
+.depth-asks {
+    color: #ff6b6b;
+}
+
+.depth-imbalance {
+    height: 8px;
+    border-radius: 4px;
+    overflow: hidden;
+    background-color: #c62828;
+}
+
+.depth-imbalance-bids {
+    height: 100%;
+    background-color: #2e7d32;
+}
