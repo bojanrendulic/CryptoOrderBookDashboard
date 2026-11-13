@@ -83,7 +83,13 @@ public sealed class OrderBookStore
             asks = book.Asks.Take(levels).ToList();
         }
 
-        return new OrderBookSnapshot(bids, asks, book.Status, book.UpdateTimeUtc);
+        return new OrderBookSnapshot(
+            bids,
+            asks,
+            book.Bids.Length > 0 ? book.Bids[0].Price : null,
+            book.Asks.Length > 0 ? book.Asks[0].Price : null,
+            book.Status,
+            book.UpdateTimeUtc);
     }
 
     // book.Book copies the whole (full-depth) book under the library's lock. Doing that per

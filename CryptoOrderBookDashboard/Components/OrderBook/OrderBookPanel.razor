@@ -10,10 +10,8 @@
     </div>
 
     <div class="order-book-spread">
-        @if (_snapshot.Bids.Count > 0 && _snapshot.Asks.Count > 0)
+        @if (_snapshot is { BestBid: { } bestBid, BestAsk: { } bestAsk })
         {
-            var bestBid = _snapshot.Bids[0].Price;
-            var bestAsk = _snapshot.Asks[0].Price;
             var mid = (bestBid + bestAsk) / 2;
             <span>Spread: @FormatNumber(bestAsk - bestBid)</span>
             <span>Mid: @FormatNumber(mid)</span>
@@ -38,7 +36,8 @@
                     <div class="depth-bar ask-bar" style="width:@(FormatPercent(pct))%"></div>
                     <div class="size-indicator"></div>
                     <span class="price">@FormatNumber(level.Price)</span>
-                    <span class="qty">@FormatNumber(level.Quantity)</span>
+                    <span class="qty">@FormatQuantity(level.Quantity)</span>
+                    <span class="notional">@FormatNotional(level.Price * level.Quantity)</span>
                 </div>
             }
         </div>
@@ -55,7 +54,8 @@
                     <div class="depth-bar bid-bar" style="width:@(FormatPercent(pct))%"></div>
                     <div class="size-indicator"></div>
                     <span class="price">@FormatNumber(level.Price)</span>
-                    <span class="qty">@FormatNumber(level.Quantity)</span>
+                    <span class="qty">@FormatQuantity(level.Quantity)</span>
+                    <span class="notional">@FormatNotional(level.Price * level.Quantity)</span>
                 </div>
             }
         </div>
@@ -165,6 +165,10 @@
     private static int SizeTier(decimal notionalUsd) => Notional.SizeTier(notionalUsd);
 
     private static string FormatNumber(decimal value) => DisplayFormat.Number(value);
+
+    private static string FormatQuantity(decimal value) => DisplayFormat.Quantity(value);
+
+    private static string FormatNotional(decimal value) => DisplayFormat.CompactUsd(value);
 
     private static string FormatPercent(double value) => DisplayFormat.Percent(value);
 

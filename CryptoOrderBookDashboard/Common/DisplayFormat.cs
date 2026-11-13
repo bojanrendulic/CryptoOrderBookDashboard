@@ -9,6 +9,9 @@ public static class DisplayFormat
     // trailing zeros are dropped.
     public static string Number(decimal value) => value.ToString("#,0.########", CultureInfo.InvariantCulture);
 
+    // Fixed 3 decimals so order book quantity columns line up.
+    public static string Quantity(decimal value) => value.ToString("#,0.000", CultureInfo.InvariantCulture);
+
     public static string Usd(decimal value) => value.ToString("#,##0", CultureInfo.InvariantCulture);
 
     public static string Percent(double value) => value.ToString("0.##", CultureInfo.InvariantCulture);

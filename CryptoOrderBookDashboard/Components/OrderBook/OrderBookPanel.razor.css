@@ -79,8 +79,9 @@
 
 .order-book-row {
     position: relative;
-    display: flex;
-    justify-content: space-between;
+    display: grid;
+    grid-template-columns: 1fr auto 7.5ch;
+    column-gap: 1rem;
     padding: 0.05rem 0.25rem 0.05rem 0.65rem;
 }
 
@@ -149,9 +150,17 @@
     background-color: #c62828;
 }
 
-.price, .qty {
+.price, .qty, .notional {
     position: relative;
     z-index: 1;
+}
+
+.qty, .notional {
+    text-align: right;
+}
+
+.notional {
+    color: #999;
 }
 
 .asks .price {
