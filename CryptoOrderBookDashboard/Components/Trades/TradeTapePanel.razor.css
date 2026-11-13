@@ -55,10 +55,23 @@
 
 .trade-row {
     position: relative;
-    display: flex;
-    justify-content: space-between;
-    gap: 0.75rem;
+    display: grid;
+    grid-template-columns: auto 1fr auto 7.5ch;
+    column-gap: 0.75rem;
     padding: 0.05rem 0.25rem 0.05rem 0.65rem;
+}
+
+.trade-row .price {
+    text-align: center;
+}
+
+.trade-row .qty,
+.trade-row .notional {
+    text-align: right;
+}
+
+.trade-row .notional {
+    color: #999;
 }
 
 .trade-row .time {

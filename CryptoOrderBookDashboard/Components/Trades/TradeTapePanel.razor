@@ -309,6 +309,7 @@
             <span class="time">@time</span>
             <span class="price">@FormatNumber(trade.Price)</span>
             <span class="qty">@FormatNumber(trade.Quantity)</span>
+            <span class="notional">@FormatNotional(trade.Price * trade.Quantity)</span>
         </div>;
     }
 
@@ -317,6 +318,8 @@
     private static string FormatNumber(decimal value) => DisplayFormat.Number(value);
 
     private static string FormatUsd(decimal value) => DisplayFormat.Usd(value);
+
+    private static string FormatNotional(decimal value) => DisplayFormat.CompactUsd(value);
 
     public void Dispose()
     {

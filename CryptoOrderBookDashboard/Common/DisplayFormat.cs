@@ -24,11 +24,12 @@ public static class DisplayFormat
     public static string SignedPercent(decimal percent, int decimals = 2) =>
         percent.ToString($"+0.{new string('0', decimals)};-0.{new string('0', decimals)};0.{new string('0', decimals)}", CultureInfo.InvariantCulture) + "%";
 
+    // Thresholds sit just below each unit so rounding never yields "$1000" or "$1000.0k".
     public static string CompactUsd(decimal value) => Math.Abs(value) switch
     {
-        >= 1_000_000_000m => "$" + (value / 1_000_000_000m).ToString("0.00", CultureInfo.InvariantCulture) + "B",
-        >= 1_000_000m => "$" + (value / 1_000_000m).ToString("0.00", CultureInfo.InvariantCulture) + "M",
-        >= 1_000m => "$" + (value / 1_000m).ToString("0.0", CultureInfo.InvariantCulture) + "k",
+        >= 999_995_000m => "$" + (value / 1_000_000_000m).ToString("0.00", CultureInfo.InvariantCulture) + "B",
+        >= 999_950m => "$" + (value / 1_000_000m).ToString("0.00", CultureInfo.InvariantCulture) + "M",
+        >= 999.5m => "$" + (value / 1_000m).ToString("0.0", CultureInfo.InvariantCulture) + "k",
         _ => "$" + value.ToString("0", CultureInfo.InvariantCulture),
     };
 
