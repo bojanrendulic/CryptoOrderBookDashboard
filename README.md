@@ -81,6 +81,10 @@ Binance WebSocket / REST
 
 Hosted background services own all exchange connections and write into singleton stores. UI components don't re-render on every exchange message. On each pulse they check a per-feed version number and re-render only if their data changed, which keeps SignalR traffic bounded no matter how busy the market is. The order book store copies each book at most once per change and shares that copy between all viewers.
 
+## Roadmap
+
+Planned features (liquidations feed, depth chart, order book heatmap, alerts, watchlist and more) are tracked in [ROADMAP.md](ROADMAP.md).
+
 ## Disclaimer
 
 This is a personal project for market observation. It is not affiliated with Binance and is not financial advice.
