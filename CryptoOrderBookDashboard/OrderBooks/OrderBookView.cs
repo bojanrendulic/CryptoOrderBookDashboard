@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace CryptoOrderBookDashboard.OrderBooks;
 
 // Price grouping as a percentage of the mid price, so one preset works for BTC and DOGE alike.
@@ -63,7 +65,11 @@ public sealed record DepthBand(string Key, decimal Percent)
 
     public static DepthBand Default => Presets[1];
 
-    public string Label => $"±{Percent:0.#}%";
+    public string Label => FormatLabel(Percent);
+
+    // Invariant culture so the label reads "±0.5%" like every other number on the page.
+    public static string FormatLabel(decimal percent) =>
+        "±" + percent.ToString("0.#", CultureInfo.InvariantCulture) + "%";
 
     public static DepthBand FromKey(string? key) =>
         Presets.FirstOrDefault(d => d.Key == key) ?? Default;

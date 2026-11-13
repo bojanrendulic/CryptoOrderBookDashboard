@@ -18,7 +18,7 @@
         }
         @if (_snapshot.GroupStep is { } step)
         {
-            <span>Group: @FormatNumber(step)</span>
+            <span>Group: $@FormatNumber(step)</span>
         }
     </div>
 
@@ -27,7 +27,7 @@
         var bidPct = (double)(depth.BidShare * 100);
         var prefix = depth.Complete ? "" : "≥ ";
         <div class="depth-summary" title="@DepthTitle(depth)">
-            <span class="depth-label">Depth @($"±{depth.Percent:0.#}%")</span>
+            <span class="depth-label">Depth @DepthBand.FormatLabel(depth.Percent)</span>
             <span class="depth-bids">@prefix@FormatNotional(depth.BidsUsd)</span>
             <div class="depth-imbalance">
                 <div class="depth-imbalance-bids" style="width:@(FormatPercent(bidPct))%"></div>
@@ -198,7 +198,7 @@
     private static string FormatNotional(decimal value) => DisplayFormat.CompactUsd(value);
 
     private static string DepthTitle(DepthSummary depth) =>
-        $"Resting bid and ask liquidity within ±{depth.Percent:0.#}% of mid."
+        $"Resting bid and ask liquidity within {DepthBand.FormatLabel(depth.Percent)} of mid."
         + (depth.Complete ? "" : " The local book does not reach the edge of this band, so these are lower bounds.");
 
     private static string FormatPercent(double value) => DisplayFormat.Percent(value);
