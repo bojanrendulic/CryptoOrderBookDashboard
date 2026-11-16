@@ -173,7 +173,7 @@
 
 .depth-summary {
     display: grid;
-    grid-template-columns: auto auto 1fr auto auto;
+    grid-template-columns: auto auto 1fr auto auto auto;
     align-items: center;
     column-gap: 0.6rem;
     margin-bottom: 0.5rem;
@@ -198,4 +198,23 @@
 .depth-imbalance-bids {
     height: 100%;
     background-color: #2e7d32;
+}
+
+.depth-chart-toggle {
+    background: none;
+    border: 0;
+    padding: 0 0.2rem;
+    color: #888;
+    font: inherit;
+    cursor: pointer;
+}
+
+.depth-chart-toggle:hover {
+    color: #eee;
+}
+
+/* Leave room for the depth chart (~150px) so the panel still fits the viewport. */
+.with-chart .order-book-columns {
+    max-height: calc(100vh - 380px);
+    min-height: 200px;
 }

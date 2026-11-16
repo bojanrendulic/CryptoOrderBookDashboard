@@ -14,7 +14,7 @@ Ideas for taking the dashboard from "live order book viewer" to a full market-st
 | 4 | Open interest vs price | Market data | 🟡 |
 | 5 | Liquidations feed | Market data | ⬜ |
 | 6 | Feed health and stale-data indicator | Reliability | 🟡 |
-| 7 | Depth chart | Visualization | ⬜ |
+| 7 | Depth chart | Visualization | ✅ |
 | 8 | Order book heatmap over time | Visualization | ⬜ |
 | 9 | Multi-symbol watchlist | Visualization | ⬜ |
 | 10 | Alerts | Product | ⬜ |
@@ -88,12 +88,19 @@ Users have to know whether they can trust the numbers they are looking at.
   - A small global status indicator in the nav.
   - A `/health` endpoint (ASP.NET Core health checks) reporting the state of each feed.
 
-### 7. Depth chart ⬜
+### 7. Depth chart ✅
 
 The classic cumulative bid/ask "V" chart next to the order book. Total liquidity is easier to read from it than from a table of numbers.
 
-- Data: the cumulative sums are already cheap to compute from the cached book copy in `OrderBookStore`.
-- Rendering: inline SVG, like `FundingBars`, limited to the selected ±% band so far-away orders don't flatten the shape.
+- Done:
+  - `DepthChart` sits above the order book rows and uses the band from the Depth selector.
+  - Cumulative USD is sampled at 120 price steps per side from the cached book copy in `OrderBookStore`.
+  - It is drawn as inline SVG and refreshed at most once a second.
+  - It is shown by default and can be collapsed.
+- Possible follow-ups:
+  - a hover crosshair with the exact price and cumulative size
+  - a log scale option
+  - hiding the chart by default and opening it with a button
 
 ### 8. Order book heatmap over time ⬜
 

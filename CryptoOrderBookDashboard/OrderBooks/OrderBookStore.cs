@@ -20,6 +20,8 @@ public sealed class OrderBookStore
         public ConcurrentDictionary<decimal, (PriceLevel[] Bids, PriceLevel[] Asks)> Grouped { get; } = new();
 
         public ConcurrentDictionary<decimal, DepthSummary> Depths { get; } = new();
+
+        public ConcurrentDictionary<decimal, DepthCurve> Curves { get; } = new();
     }
 
     private sealed class Entry(ISymbolOrderBook book)
@@ -149,6 +151,65 @@ public sealed class OrderBookStore
         }
 
         return result.ToArray();
+    }
+
+    // Cumulative depth curve for the depth chart, from the unfiltered, ungrouped book. Cached per
+    // book version and band like the depth sums, so all viewers share one computation.
+    public DepthCurve? GetDepthCurve(OrderBookKey key, decimal percent)
+    {
+        if (percent <= 0 || !_books.TryGetValue(key, out var entry))
+        {
+            return null;
+        }
+
+        var book = GetOrBuildCache(entry);
+        if (book.Bids.Length == 0 || book.Asks.Length == 0)
+        {
+            return null;
+        }
+
+        var mid = (book.Bids[0].Price + book.Asks[0].Price) / 2;
+        return book.Curves.GetOrAdd(percent, p => ComputeCurve(book, mid, p));
+    }
+
+    private static DepthCurve ComputeCurve(CachedBook book, decimal mid, decimal percent)
+    {
+        var stepWidth = mid * percent / 100m / DepthCurve.Steps;
+        var (bids, bidSteps) = Accumulate(book.Bids, i => mid - (i + 1) * stepWidth, (price, edge) => price >= edge);
+        var (asks, askSteps) = Accumulate(book.Asks, i => mid + (i + 1) * stepWidth, (price, edge) => price <= edge);
+        return new DepthCurve(percent, mid, bids, asks, bidSteps, askSteps);
+    }
+
+    // Walks one side best-first in a single pass. A point is only "covered" if the local book
+    // reaches at least to its edge price; past the book's last level the sum is unknown.
+    private static (decimal[] Cumulative, int Covered) Accumulate(
+        PriceLevel[] levels,
+        Func<int, decimal> edgeAt,
+        Func<decimal, decimal, bool> isInside)
+    {
+        var cumulative = new decimal[DepthCurve.Steps];
+        var lastPrice = levels[^1].Price;
+        var covered = 0;
+        var sum = 0m;
+        var index = 0;
+
+        for (var i = 0; i < DepthCurve.Steps; i++)
+        {
+            var edge = edgeAt(i);
+            while (index < levels.Length && isInside(levels[index].Price, edge))
+            {
+                sum += levels[index].Price * levels[index].Quantity;
+                index++;
+            }
+
+            cumulative[i] = sum;
+            if (!isInside(lastPrice, edge))
+            {
+                covered = i + 1;
+            }
+        }
+
+        return (cumulative, covered);
     }
 
     private static DepthSummary ComputeDepth(CachedBook book, decimal mid, decimal percent)

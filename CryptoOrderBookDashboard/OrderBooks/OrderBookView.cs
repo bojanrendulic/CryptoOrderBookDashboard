@@ -82,3 +82,25 @@ public sealed record DepthSummary(decimal Percent, decimal BidsUsd, decimal Asks
 {
     public decimal BidShare => BidsUsd + AsksUsd > 0 ? BidsUsd / (BidsUsd + AsksUsd) : 0.5m;
 }
+
+// Cumulative USD depth sampled at fixed price steps within ±Percent of mid, for the depth chart.
+// Bids[i] / Asks[i] is the cumulative notional from mid out to (i + 1) / Steps of the band.
+// A fixed number of points keeps the chart (and its SVG diff) the same size whatever the book's
+// tick size. BidSteps/AskSteps count the leading points the local book fully covers; points
+// beyond them would only be lower bounds and are not drawn.
+public sealed record DepthCurve(
+    decimal Percent,
+    decimal Mid,
+    IReadOnlyList<decimal> Bids,
+    IReadOnlyList<decimal> Asks,
+    int BidSteps,
+    int AskSteps)
+{
+    public const int Steps = 120;
+
+    public bool Complete => BidSteps == Steps && AskSteps == Steps;
+
+    public decimal MaxUsd => Math.Max(
+        BidSteps > 0 ? Bids[BidSteps - 1] : 0m,
+        AskSteps > 0 ? Asks[AskSteps - 1] : 0m);
+}

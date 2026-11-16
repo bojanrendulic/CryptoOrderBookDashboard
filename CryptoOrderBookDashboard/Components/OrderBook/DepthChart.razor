@@ -1,0 +1,88 @@
+@using System.Globalization
+@using System.Text
+
+@* Cumulative bid/ask depth ("V" chart) within ±X% of mid. Plain SVG stretched to the panel width;
+   all text lives in HTML around it, because a non-uniformly scaled SVG would distort glyphs. *@
+<div class="depth-chart">
+    <div class="depth-chart-max">max @MaxLabel</div>
+    <svg class="depth-chart-svg" viewBox="0 0 @F(Width) @F(Height)" preserveAspectRatio="none"
+         role="img" aria-label="@AriaLabel">
+        <line class="mid-line" x1="@F(Width / 2)" x2="@F(Width / 2)" y1="0" y2="@F(Height)" />
+        @if (Curve.BidSteps > 0)
+        {
+            <path class="area-bid" d="@AreaPath(Curve.Bids, Curve.BidSteps, -1)" />
+            <path class="line-bid" d="@LinePath(Curve.Bids, Curve.BidSteps, -1)" />
+        }
+        @if (Curve.AskSteps > 0)
+        {
+            <path class="area-ask" d="@AreaPath(Curve.Asks, Curve.AskSteps, 1)" />
+            <path class="line-ask" d="@LinePath(Curve.Asks, Curve.AskSteps, 1)" />
+        }
+    </svg>
+    <div class="depth-chart-axis">
+        <span>@DisplayFormat.Number(RoundPrice(Curve.Mid * (1 - Curve.Percent / 100m)))</span>
+        <span>Mid @DisplayFormat.Number(RoundPrice(Curve.Mid))</span>
+        <span>@DisplayFormat.Number(RoundPrice(Curve.Mid * (1 + Curve.Percent / 100m)))</span>
+    </div>
+    @if (!Curve.Complete)
+    {
+        <div class="depth-chart-note">The local book ends inside this band; the curve stops where the data does.</div>
+    }
+</div>
+
+@code {
+    private const double Width = 600;
+    private const double Height = 120;
+
+    [Parameter, EditorRequired]
+    public DepthCurve Curve { get; set; } = default!;
+
+    private decimal Scale => Curve.MaxUsd > 0 ? Curve.MaxUsd * 1.05m : 1m;
+
+    private string MaxLabel => DisplayFormat.CompactUsd(Curve.MaxUsd);
+
+    private string AriaLabel =>
+        $"Cumulative depth within {DepthBand.FormatLabel(Curve.Percent)} of mid, up to {MaxLabel}";
+
+    private double X(int step, int direction) =>
+        Width / 2 + direction * (step + 1) * (Width / 2) / DepthCurve.Steps;
+
+    private double Y(decimal cumulative) => Height - (double)(cumulative / Scale) * Height;
+
+    // Step line from mid outwards: each point holds its level, then jumps at the next edge, so a
+    // big wall shows as a vertical cliff instead of a gentle slope.
+    private string LinePath(IReadOnlyList<decimal> values, int count, int direction)
+    {
+        var sb = new StringBuilder();
+        sb.Append("M").Append(F(Width / 2)).Append(' ').Append(F(Height));
+        var previousY = Height;
+        for (var i = 0; i < count; i++)
+        {
+            var x = X(i, direction);
+            var y = Y(values[i]);
+            sb.Append(" H").Append(F(x - direction * (Width / 2) / DepthCurve.Steps));
+            if (y != previousY)
+            {
+                sb.Append(" V").Append(F(y));
+            }
+
+            previousY = y;
+        }
+
+        sb.Append(" H").Append(F(X(count - 1, direction)));
+        return sb.ToString();
+    }
+
+    private string AreaPath(IReadOnlyList<decimal> values, int count, int direction) =>
+        LinePath(values, count, direction) + " V" + F(Height) + " Z";
+
+    // Axis labels only need a readable price, not the full tick precision.
+    private static decimal RoundPrice(decimal price) => price switch
+    {
+        >= 1000m => Math.Round(price, 0),
+        >= 1m => Math.Round(price, 2),
+        _ => Math.Round(price, 6),
+    };
+
+    private static string F(double value) => value.ToString("0.#", CultureInfo.InvariantCulture);
+}

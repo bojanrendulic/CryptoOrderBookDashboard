@@ -3,7 +3,7 @@
 @inject IOptions<OrderBookDashboardOptions> Options
 @inject IJSRuntime JS
 
-<div class="order-book-panel">
+<div class="order-book-panel @(_showChart && _curve is not null ? "with-chart" : "")">
     <div class="order-book-header">
         <span class="order-book-title">@Symbol <span class="order-book-market">@MarketLabel</span></span>
         <span class="order-book-status status-@_snapshot.Status.ToString().ToLowerInvariant()">@_snapshot.Status</span>
@@ -34,7 +34,15 @@
             </div>
             <span class="depth-asks">@prefix@FormatNotional(depth.AsksUsd)</span>
             <span class="depth-share">@($"{bidPct:0}% / {100 - bidPct:0}%")</span>
+            <button type="button" class="depth-chart-toggle" @onclick="ToggleChart"
+                    aria-expanded="@(_showChart ? "true" : "false")"
+                    title="@(_showChart ? "Hide depth chart" : "Show depth chart")">@(_showChart ? "▾" : "▸")</button>
         </div>
+    }
+
+    @if (_showChart && _curve is not null)
+    {
+        <DepthChart Curve="_curve" />
     }
 
     @if ((MinNotionalUsd is not null || MaxNotionalUsd is not null) && _snapshot.Bids.Count == 0 && _snapshot.Asks.Count == 0)
@@ -105,6 +113,19 @@
     [Parameter]
     public decimal? DepthPercent { get; set; }
 
+    // The depth chart refreshes at most once a second: the eye can't follow faster, and each
+    // refresh changes two SVG paths in the SignalR diff.
+    private const long CurveRefreshMilliseconds = 1000;
+
+    private DepthCurve? _curve;
+    private bool _showChart = true;
+    private string? _curveKey;
+    private long _curveTicks;
+
+    // Store version the current curve was built from; while it lags the book the pulse keeps
+    // refreshing (once a second), so a book that goes quiet still ends with an up-to-date chart.
+    private long _curveVersion = long.MinValue;
+
     private OrderBookSnapshot _snapshot = OrderBookSnapshot.Empty;
     private ElementReference _spreadMarker;
     private IJSObjectReference? _module;
@@ -156,7 +177,13 @@
     {
         // Nothing changed in this book since the last render - skip the render and the
         // SignalR diff entirely (common for quieter symbols).
-        if (_disposed || Store.GetVersion(_key) == Volatile.Read(ref _renderedVersion))
+        if (_disposed)
+        {
+            return;
+        }
+
+        var version = Store.GetVersion(_key);
+        if (version == Volatile.Read(ref _renderedVersion) && !CurveIsDue(version))
         {
             return;
         }
@@ -185,8 +212,37 @@
 
         // Version first: if the book changes while the snapshot is being built, the next pulse
         // sees a newer version and refreshes again rather than missing the update.
-        Volatile.Write(ref _renderedVersion, Store.GetVersion(_key));
+        var version = Store.GetVersion(_key);
+        Volatile.Write(ref _renderedVersion, version);
         _snapshot = Store.GetSnapshot(_key, levels, MinNotionalUsd, MaxNotionalUsd, GroupPercent, DepthPercent);
+        RefreshCurve(version);
+    }
+
+    private void RefreshCurve(long version)
+    {
+        // A new symbol, market or band must show immediately; otherwise wait for the 1s cadence.
+        var curveKey = $"{Market}:{Symbol}:{DepthPercent}";
+        if (curveKey == _curveKey && !CurveIsDue(version))
+        {
+            return;
+        }
+
+        _curveKey = curveKey;
+        _curve = _showChart && DepthPercent is { } percent ? Store.GetDepthCurve(_key, percent) : null;
+        Volatile.Write(ref _curveTicks, Environment.TickCount64);
+        Volatile.Write(ref _curveVersion, version);
+    }
+
+    private bool CurveIsDue(long version) =>
+        _showChart
+        && version != Volatile.Read(ref _curveVersion)
+        && Environment.TickCount64 - Volatile.Read(ref _curveTicks) >= CurveRefreshMilliseconds;
+
+    private void ToggleChart()
+    {
+        _showChart = !_showChart;
+        _curveKey = null;
+        RefreshCurve(Store.GetVersion(_key));
     }
 
     private static int SizeTier(decimal notionalUsd) => Notional.SizeTier(notionalUsd);
