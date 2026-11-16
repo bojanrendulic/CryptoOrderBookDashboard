@@ -45,6 +45,14 @@
         <DepthChart Curve="_curve" />
     }
 
+    @if (_rowsOutsideBand > 0 && _depth is { } band)
+    {
+        <div class="depth-band-note">
+            Chart and depth bar show all orders within @band.Label; @_rowsOutsideBand table row(s) lie beyond it.
+            Set Depth to Rows to chart the table.
+        </div>
+    }
+
     @if ((MinNotionalUsd is not null || MaxNotionalUsd is not null) && _snapshot.Bids.Count == 0 && _snapshot.Asks.Count == 0)
     {
         <div class="order-book-empty">No orders in the selected size range currently.</div>
@@ -123,6 +131,7 @@
 
     private DepthCurve? _curve;
     private DepthSummary? _depth;
+    private int _rowsOutsideBand;
     private readonly RowsRange _rowsRange = new();
     private bool _showChart = true;
     private string? _curveKey;
@@ -222,6 +231,7 @@
         Volatile.Write(ref _renderedVersion, version);
         _snapshot = Store.GetSnapshot(_key, levels, MinNotionalUsd, MaxNotionalUsd, GroupPercent, EffectiveDepthPercent);
         _depth = RowsMode ? RowsSummary(_snapshot) : _snapshot.Depth;
+        _rowsOutsideBand = DepthFollowsRows ? 0 : RowsOutsideBand(_snapshot, EffectiveDepthPercent);
         RefreshCurve(version);
     }
 
@@ -246,6 +256,22 @@
             bids.Sum(l => l.Price * l.Quantity),
             asks.Sum(l => l.Price * l.Quantity),
             Complete: true);
+    }
+
+    // In a ±% band the chart and bar ignore the size filter and grouping, while the table can list
+    // walls far beyond the band. Count those rows so the panel can say so instead of leaving the
+    // chart and table to silently disagree.
+    private static int RowsOutsideBand(OrderBookSnapshot snapshot, decimal? percent)
+    {
+        if (percent is not { } p || snapshot is not { BestBid: { } bestBid, BestAsk: { } bestAsk })
+        {
+            return 0;
+        }
+
+        var mid = (bestBid + bestAsk) / 2;
+        var low = mid * (1 - p / 100m);
+        var high = mid * (1 + p / 100m);
+        return snapshot.Bids.Count(l => l.Price < low) + snapshot.Asks.Count(l => l.Price > high);
     }
 
     private static (List<PriceLevel> Bids, List<PriceLevel> Asks) RowsWithinCap(OrderBookSnapshot snapshot, decimal mid)

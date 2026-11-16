@@ -218,3 +218,9 @@
     max-height: calc(100vh - 380px);
     min-height: 200px;
 }
+
+.depth-band-note {
+    margin: -0.25rem 0 0.5rem;
+    color: #b8a76a;
+    font-size: 0.75rem;
+}
