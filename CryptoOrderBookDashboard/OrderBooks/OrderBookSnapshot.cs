@@ -2,7 +2,8 @@ namespace CryptoOrderBookDashboard.OrderBooks;
 
 // BestBid/BestAsk and Depth always come from the full, unfiltered and ungrouped book, so spread,
 // mid and depth stay correct whatever filter or grouping is applied to the rows.
-// GroupStep is the price bucket the rows were grouped by (null = not grouped).
+// GroupStep is the price bucket the rows were grouped by (null = not grouped). Boundary is the
+// range of the snapshot the book was synced from; rows beyond it may have unseen neighbours.
 public sealed record OrderBookSnapshot(
     IReadOnlyList<PriceLevel> Bids,
     IReadOnlyList<PriceLevel> Asks,
@@ -11,7 +12,8 @@ public sealed record OrderBookSnapshot(
     decimal? GroupStep,
     DepthSummary? Depth,
     OrderBookFeedStatus Status,
-    DateTime LastUpdateUtc)
+    DateTime LastUpdateUtc,
+    SnapshotBoundary? Boundary = null)
 {
     public static readonly OrderBookSnapshot Empty = new(
         Array.Empty<PriceLevel>(),

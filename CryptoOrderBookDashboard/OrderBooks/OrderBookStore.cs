@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using CryptoExchange.Net.Interfaces;
+using CryptoExchange.Net.Objects;
 using CryptoOrderBookDashboard.Common;
 
 namespace CryptoOrderBookDashboard.OrderBooks;
@@ -13,7 +14,8 @@ public sealed class OrderBookStore
         PriceLevel[] Bids,
         PriceLevel[] Asks,
         OrderBookFeedStatus Status,
-        DateTime UpdateTimeUtc)
+        DateTime UpdateTimeUtc,
+        SnapshotBoundary? Boundary)
     {
         // Grouped views and depth sums derived from this version, keyed by step / percent and
         // shared by all viewers like the copy itself.
@@ -35,6 +37,13 @@ public sealed class OrderBookStore
         public long Version;
 
         public CachedBook? Cache;
+
+        // Range of the snapshot behind the current sync (null until it has been seen).
+        public SnapshotBoundary? Boundary;
+
+        // 1 while waiting for the next snapshot: set on start and whenever the book leaves
+        // Synced (reconnect, resync), cleared once the snapshot update has been captured.
+        public int AwaitingSnapshot = 1;
     }
 
     private readonly ConcurrentDictionary<OrderBookKey, Entry> _books = new();
@@ -44,9 +53,59 @@ public sealed class OrderBookStore
     public void Register(OrderBookKey key, ISymbolOrderBook book)
     {
         var entry = new Entry(book);
-        book.OnOrderBookUpdate += _ => Interlocked.Increment(ref entry.Version);
-        book.OnStatusChange += (_, _) => Interlocked.Increment(ref entry.Version);
+        book.OnOrderBookUpdate += update =>
+        {
+            if (Volatile.Read(ref entry.AwaitingSnapshot) == 1)
+            {
+                CaptureBoundary(entry, update.Bids, update.Asks);
+            }
+
+            Interlocked.Increment(ref entry.Version);
+        };
+        book.OnStatusChange += (_, newStatus) =>
+        {
+            if (newStatus != OrderBookStatus.Synced)
+            {
+                Volatile.Write(ref entry.Boundary, null);
+                Volatile.Write(ref entry.AwaitingSnapshot, 1);
+            }
+
+            Interlocked.Increment(ref entry.Version);
+        };
         _books[key] = entry;
+    }
+
+    // The first update after a (re)sync carries the whole REST snapshot (verified against
+    // Binance.Net 13.3: 5000 levels per side on spot, 1000 on futures; on spot it can even arrive
+    // before the status turns Synced). Its outermost prices mark how far the book is complete;
+    // reading the book on the status change instead is unreliable, because on futures the book is
+    // still empty then and on spot buffered diffs have already been applied.
+    private static void CaptureBoundary(
+        Entry entry,
+        IEnumerable<ISymbolOrderBookEntry> bids,
+        IEnumerable<ISymbolOrderBookEntry> asks)
+    {
+        decimal? lowestBid = null;
+        decimal? highestAsk = null;
+        foreach (var bid in bids)
+        {
+            lowestBid = lowestBid is null || bid.Price < lowestBid ? bid.Price : lowestBid;
+        }
+
+        foreach (var ask in asks)
+        {
+            highestAsk = highestAsk is null || ask.Price > highestAsk ? ask.Price : highestAsk;
+        }
+
+        // Diffs are buffered until the snapshot is applied, so the first update is the snapshot;
+        // a one-sided book (nothing to bound) just waits for the next update.
+        if (lowestBid is null || highestAsk is null)
+        {
+            return;
+        }
+
+        Volatile.Write(ref entry.Boundary, new SnapshotBoundary(lowestBid.Value, highestAsk.Value, DateTime.UtcNow));
+        Volatile.Write(ref entry.AwaitingSnapshot, 0);
     }
 
     public void Unregister(OrderBookKey key) => _books.TryRemove(key, out _);
@@ -128,7 +187,8 @@ public sealed class OrderBookStore
             groupStep,
             depth,
             book.Status,
-            book.UpdateTimeUtc);
+            book.UpdateTimeUtc,
+            book.Boundary);
     }
 
     // Merges levels into price buckets of `step`. Bids round down and asks round up (as on
@@ -180,7 +240,8 @@ public sealed class OrderBookStore
             book.Bids,
             book.Asks,
             bookEnds: true,
-            DepthBand.FormatLabel(percent));
+            DepthBand.FormatLabel(percent),
+            book.Boundary);
 
     private static DepthSummary ComputeDepth(CachedBook book, decimal mid, decimal percent)
     {
@@ -209,9 +270,12 @@ public sealed class OrderBookStore
             asksUsd += level.Price * level.Quantity;
         }
 
-        // The sums are only complete if the local book reaches past the band on both sides.
-        var complete = book.Bids.Length > 0 && book.Bids[^1].Price < lowerBound
-            && book.Asks.Length > 0 && book.Asks[^1].Price > upperBound;
+        // The sums are only complete if the last snapshot reached the band edge on both sides.
+        // The local book often extends much further (levels learned from live updates), but
+        // beyond the snapshot unchanged resting orders are missing, so that proves nothing.
+        var complete = book.Boundary is { } boundary
+            && boundary.CoversBid(lowerBound)
+            && boundary.CoversAsk(upperBound);
 
         return new DepthSummary(DepthBand.FormatLabel(percent), bidsUsd, asksUsd, complete);
     }
@@ -245,7 +309,8 @@ public sealed class OrderBookStore
                 bids.Select(e => new PriceLevel(e.Price, e.Quantity)).ToArray(),
                 asks.Select(e => new PriceLevel(e.Price, e.Quantity)).ToArray(),
                 OrderBookFeedStatusMapper.FromLibraryStatus(entry.Book.Status),
-                entry.Book.UpdateTime);
+                entry.Book.UpdateTime,
+                Volatile.Read(ref entry.Boundary));
 
             Volatile.Write(ref entry.Cache, cache);
             return cache;

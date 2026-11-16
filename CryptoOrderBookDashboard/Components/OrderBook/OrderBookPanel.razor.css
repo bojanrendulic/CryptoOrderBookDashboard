@@ -224,3 +224,17 @@
     color: #b8a76a;
     font-size: 0.75rem;
 }
+
+/* Rows beyond the sync snapshot: the level is real, but its neighbourhood may be incomplete. */
+.order-book-row.partial .price,
+.order-book-row.partial .qty,
+.order-book-row.partial .notional {
+    opacity: 0.55;
+}
+
+.snapshot-reach {
+    margin-left: auto;
+    color: #777;
+    font-size: 0.75rem;
+    cursor: help;
+}

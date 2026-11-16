@@ -1,3 +1,4 @@
+@using System.Globalization
 @implements IAsyncDisposable
 @inject OrderBookStore Store
 @inject IOptions<OrderBookDashboardOptions> Options
@@ -19,6 +20,10 @@
         @if (_snapshot.GroupStep is { } step)
         {
             <span>Group: $@FormatNumber(step)</span>
+        }
+        @if (_snapshot.Status == OrderBookFeedStatus.Synced && MidPrice is { } midPrice)
+        {
+            <span class="snapshot-reach" title="@SnapshotTitle">@SnapshotLabel(midPrice)</span>
         }
     </div>
 
@@ -67,7 +72,8 @@
             {
                 var pct = maxAskQty > 0 ? (double)(level.Quantity / maxAskQty) * 100 : 0;
                 var tier = SizeTier(level.Price * level.Quantity);
-                <div class="order-book-row size-tier-@tier">
+                var partial = _snapshot.Boundary is { } askBoundary && !askBoundary.CoversAsk(level.Price);
+                <div class="order-book-row size-tier-@tier @(partial ? "partial" : "")" title="@(partial ? PartialRowTitle : null)">
                     <div class="depth-bar ask-bar" style="width:@(FormatPercent(pct))%"></div>
                     <div class="size-indicator"></div>
                     <span class="price">@FormatNumber(level.Price)</span>
@@ -85,7 +91,8 @@
             {
                 var pct = maxBidQty > 0 ? (double)(level.Quantity / maxBidQty) * 100 : 0;
                 var tier = SizeTier(level.Price * level.Quantity);
-                <div class="order-book-row size-tier-@tier">
+                var partial = _snapshot.Boundary is { } bidBoundary && !bidBoundary.CoversBid(level.Price);
+                <div class="order-book-row size-tier-@tier @(partial ? "partial" : "")" title="@(partial ? PartialRowTitle : null)">
                     <div class="depth-bar bid-bar" style="width:@(FormatPercent(pct))%"></div>
                     <div class="size-indicator"></div>
                     <span class="price">@FormatNumber(level.Price)</span>
@@ -255,7 +262,9 @@
             "Rows",
             bids.Sum(l => l.Price * l.Quantity),
             asks.Sum(l => l.Price * l.Quantity),
-            Complete: true);
+            Complete: snapshot.Boundary is { } boundary
+                && bids.All(l => boundary.CoversBid(l.Price))
+                && asks.All(l => boundary.CoversAsk(l.Price)));
     }
 
     // In a ±% band the chart and bar ignore the size filter and grouping, while the table can list
@@ -326,7 +335,7 @@
         }
 
         var (low, high) = _rowsRange.Update(mid, bids, asks);
-        return DepthCurve.Build(mid, low, high, bids, asks, bookEnds: false, "Rows") with
+        return DepthCurve.Build(mid, low, high, bids, asks, bookEnds: false, "Rows", snapshot.Boundary) with
         {
             RowsBeyondCap = snapshot.Bids.Count + snapshot.Asks.Count - bids.Count - asks.Count,
         };
@@ -344,6 +353,35 @@
         RefreshCurve(Store.GetVersion(_key));
     }
 
+
+    private decimal? MidPrice => _snapshot is { BestBid: { } bid, BestAsk: { } ask } ? (bid + ask) / 2 : null;
+
+    // How far the sync snapshot reaches and how long deeper levels have been learned from live
+    // updates. On futures the snapshot is 1000 levels - often only ±0.2% of price.
+    private string SnapshotLabel(decimal mid)
+    {
+        if (_snapshot.Boundary is not { } boundary)
+        {
+            return "snapshot: waiting";
+        }
+
+        var age = DateTime.UtcNow - boundary.SyncedUtc;
+        var ageText = age.TotalMinutes < 1 ? "<1m"
+            : age.TotalHours < 1 ? $"{(int)age.TotalMinutes}m"
+            : $"{(int)age.TotalHours}h {age.Minutes}m";
+        return string.Create(CultureInfo.InvariantCulture,
+            $"snapshot −{boundary.BidReachPercent(mid):0.##}% / +{boundary.AskReachPercent(mid):0.##}% · learning {ageText}");
+    }
+
+    private string SnapshotTitle => _snapshot.Boundary is { } boundary
+        ? $"The book was synced from a REST snapshot covering {DisplayFormat.Number(boundary.LowestBid)} – {DisplayFormat.Number(boundary.HighestAsk)} " +
+          $"(Binance sends at most 5000 levels per side on spot, 1000 on futures). Inside that range the book is complete. " +
+          $"Beyond it, a price level is only known once it has changed since the sync at {boundary.SyncedUtc.ToLocalTime():HH:mm:ss}, " +
+          "so resting orders that haven't moved are missing. The longer the feed runs, the more of the deep book is filled in."
+        : "Waiting for the order book snapshot.";
+
+    private const string PartialRowTitle =
+        "Beyond the snapshot the book was synced from: this level is real, but nearby resting orders that haven't changed since the sync may be missing.";
     private static int SizeTier(decimal notionalUsd) => Notional.SizeTier(notionalUsd);
 
     private static string FormatNumber(decimal value) => DisplayFormat.Number(value);
@@ -357,7 +395,7 @@
             ? $"Sum of the visible rows within ±{DepthBand.RowsMaxPercent:0}% of mid - the same rows the chart and table show."
             : $"Resting bid and ask liquidity within {depth.Label} of mid."
             + (DepthFollowsRows ? " Rows mode needs a Min size filter, so this falls back to a band." : "")
-        + (depth.Complete ? "" : " The local book does not reach the edge of this band, so these are lower bounds.");
+        + (depth.Complete ? "" : " Part of this lies beyond the snapshot the book was synced from, where orders that haven't changed since are missing - so these are lower bounds.");
 
     private static string FormatPercent(double value) => DisplayFormat.Percent(value);
 

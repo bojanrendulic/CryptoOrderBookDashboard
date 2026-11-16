@@ -13,15 +13,27 @@
         <svg class="depth-chart-svg" viewBox="0 0 @F(Width) @F(Height)" preserveAspectRatio="none"
              role="img" aria-label="@AriaLabel" data-curve="@CurveData">
             <line class="mid-line" x1="@F(MidX)" x2="@F(MidX)" y1="0" y2="@F(Height)" />
-            @if (Curve.BidSteps > 0)
+            @* Past the snapshot boundary the curve is drawn faint and dashed (learned from live
+               updates only); the reliable part is drawn over it in full colour. *@
+            @if (BidReliable < Curve.BidSteps)
             {
-                <path class="area-bid" d="@AreaPath(Curve.Bids, Curve.BidSteps, -1)" />
-                <path class="line-bid" d="@LinePath(Curve.Bids, Curve.BidSteps, -1)" />
+                <path class="area-bid partial" d="@AreaPath(Curve.Bids, Curve.BidSteps, -1)" />
+                <path class="line-bid partial" d="@LinePath(Curve.Bids, Curve.BidSteps, -1)" />
             }
-            @if (Curve.AskSteps > 0)
+            @if (BidReliable > 0)
             {
-                <path class="area-ask" d="@AreaPath(Curve.Asks, Curve.AskSteps, 1)" />
-                <path class="line-ask" d="@LinePath(Curve.Asks, Curve.AskSteps, 1)" />
+                <path class="area-bid" d="@AreaPath(Curve.Bids, BidReliable, -1)" />
+                <path class="line-bid" d="@LinePath(Curve.Bids, BidReliable, -1)" />
+            }
+            @if (AskReliable < Curve.AskSteps)
+            {
+                <path class="area-ask partial" d="@AreaPath(Curve.Asks, Curve.AskSteps, 1)" />
+                <path class="line-ask partial" d="@LinePath(Curve.Asks, Curve.AskSteps, 1)" />
+            }
+            @if (AskReliable > 0)
+            {
+                <path class="area-ask" d="@AreaPath(Curve.Asks, AskReliable, 1)" />
+                <path class="line-ask" d="@LinePath(Curve.Asks, AskReliable, 1)" />
             }
         </svg>
         @* Owned by JS: Blazor never renders children here, so the overlay survives re-renders. *@
@@ -39,6 +51,10 @@
     {
         <div class="depth-chart-note">The local book ends inside this band; the curve stops where the data does.</div>
     }
+    @if (!Curve.Reliable)
+    {
+        <div class="depth-chart-note">@PartialNote</div>
+    }
     @if (Curve.RowsBeyondCap > 0)
     {
         <div class="depth-chart-note">@Curve.RowsBeyondCap row(s) beyond ±@DepthBand.RowsMaxPercent.ToString("0", CultureInfo.InvariantCulture)% of mid are listed below but left out of the chart and the depth bar.</div>
@@ -55,9 +71,28 @@
     private ElementReference _plot;
     private IJSObjectReference? _module;
 
+
+    private int BidReliable => Math.Min(Curve.BidReliable, Curve.BidSteps);
+
+    private int AskReliable => Math.Min(Curve.AskReliable, Curve.AskSteps);
+
+    private string PartialNote
+    {
+        get
+        {
+            if (Curve.Boundary is not { } boundary)
+            {
+                return "Waiting for the order book snapshot; the curve may be incomplete.";
+            }
+
+            return string.Create(CultureInfo.InvariantCulture,
+                $"Faint part: beyond the sync snapshot (−{boundary.BidReachPercent(Curve.Mid):0.##}% / +{boundary.AskReachPercent(Curve.Mid):0.##}%), " +
+                $"learned from live updates since {boundary.SyncedUtc.ToLocalTime():HH:mm} — orders that haven't changed since are missing, so it may be too low.");
+        }
+    }
     private decimal Scale => Curve.MaxUsd > 0 ? Curve.MaxUsd * 1.05m : 1m;
 
-    // "mid;low;high;scale;bidSteps;askSteps;bids…;asks…" with comma-separated whole-dollar sums.
+    // "mid;low;high;scale;bidSteps;askSteps;bidReliable;askReliable;bids…;asks…" with comma-separated whole-dollar sums.
     // Changes only when the curve does (at most once a second), like the paths themselves.
     private string CurveData
     {
@@ -69,7 +104,9 @@
                 .Append(Curve.High.ToString(CultureInfo.InvariantCulture)).Append(';')
                 .Append(Math.Round(Scale).ToString(CultureInfo.InvariantCulture)).Append(';')
                 .Append(Curve.BidSteps).Append(';')
-                .Append(Curve.AskSteps).Append(';');
+                .Append(Curve.AskSteps).Append(';')
+                .Append(BidReliable).Append(';')
+                .Append(AskReliable).Append(';');
             AppendSums(sb, Curve.Bids, Curve.BidSteps);
             sb.Append(';');
             AppendSums(sb, Curve.Asks, Curve.AskSteps);

@@ -156,3 +156,19 @@
 .axis-pct {
     color: #666;
 }
+
+/* Beyond the sync snapshot: learned from live updates only, may be incomplete. */
+.area-bid.partial,
+.area-ask.partial {
+    fill-opacity: 0.12;
+}
+
+.line-bid.partial,
+.line-ask.partial {
+    stroke-dasharray: 4 3;
+    stroke-opacity: 0.6;
+}
+
+.depth-chart-overlay ::deep .dc-note {
+    color: #b8a76a;
+}

@@ -80,6 +80,8 @@ function render(state) {
     const covered = isBid ? curve.bidSteps : curve.askSteps;
     const pctFromMid = ((price - curve.mid) / curve.mid) * 100;
     const hasData = index < covered;
+    // Past the snapshot boundary the sum is learned from live updates only: a lower bound.
+    const partial = index >= (isBid ? curve.bidReliable : curve.askReliable);
     const value = hasData ? values[index] : null;
     const midX = (rect.width * (curve.mid - curve.low)) / (curve.high - curve.low);
 
@@ -107,7 +109,8 @@ function render(state) {
         `<div><span class="dc-k">Price</span> ${formatPrice(price, curve.mid)} ` +
         `<span class="dc-pct">(${pctFromMid >= 0 ? "+" : ""}${pctFromMid.toFixed(2)}%)</span></div>` +
         `<div><span class="dc-k">${label}</span> ` +
-        `<span class="dc-v">${hasData ? formatUsd(value) : "no data"}</span></div>`;
+        `<span class="dc-v">${hasData ? (partial ? "≥ " : "") + formatUsd(value) : "no data"}</span></div>` +
+        (hasData && partial ? `<div class="dc-note">beyond sync snapshot, may be incomplete</div>` : "");
 
     // Follow the mouse, flipping to the other side near the right edge and staying inside.
     const tipWidth = state.tip.offsetWidth;
@@ -132,7 +135,7 @@ function readCurve(state) {
     }
 
     const parts = raw.split(";");
-    if (parts.length < 8) {
+    if (parts.length < 10) {
         return null;
     }
 
@@ -144,8 +147,10 @@ function readCurve(state) {
         scale: Number(parts[3]) || 1,
         bidSteps: Number(parts[4]),
         askSteps: Number(parts[5]),
-        bids: list(parts[6]),
-        asks: list(parts[7]),
+        bidReliable: Number(parts[6]),
+        askReliable: Number(parts[7]),
+        bids: list(parts[8]),
+        asks: list(parts[9]),
     };
     return state.curve;
 }

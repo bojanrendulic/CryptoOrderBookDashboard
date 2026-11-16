@@ -97,8 +97,10 @@ public sealed record DepthSummary(string Label, decimal BidsUsd, decimal AsksUsd
 // be centred). Each side is sampled at Steps fixed price steps from mid outwards: Bids[i] is the
 // cumulative notional from mid down to mid - (i + 1) / Steps * (Mid - Low), Asks likewise up to
 // High. A fixed number of points keeps the chart (and its SVG diff) the same size whatever the
-// book's tick size or the range. BidSteps/AskSteps count the leading points the data fully
-// covers; points beyond them would only be lower bounds and are not drawn.
+// book's tick size or the range. BidSteps/AskSteps count the leading points the local data
+// reaches; points beyond them are unknown and not drawn. BidReliable/AskReliable count the leading
+// points inside the snapshot boundary: past them the curve is drawn but only learned from live
+// updates, so it may be too low.
 public sealed record DepthCurve(
     decimal Mid,
     decimal Low,
@@ -109,6 +111,14 @@ public sealed record DepthCurve(
     int AskSteps,
     string Label)
 {
+    public int BidReliable { get; init; } = Steps;
+
+    public int AskReliable { get; init; } = Steps;
+
+    public SnapshotBoundary? Boundary { get; init; }
+
+    public bool Reliable => BidReliable >= BidSteps && AskReliable >= AskSteps;
+
     public const int Steps = 120;
 
     // Rows mode: visible rows left out because they are beyond ±RowsMaxPercent of mid.
@@ -130,13 +140,33 @@ public sealed record DepthCurve(
         IReadOnlyList<PriceLevel> bids,
         IReadOnlyList<PriceLevel> asks,
         bool bookEnds,
-        string label)
+        string label,
+        SnapshotBoundary? boundary)
     {
         var bidStep = (mid - low) / Steps;
         var askStep = (high - mid) / Steps;
         var (bidSums, bidSteps) = Accumulate(bids, i => mid - (i + 1) * bidStep, (price, edge) => price >= edge, bookEnds);
         var (askSums, askSteps) = Accumulate(asks, i => mid + (i + 1) * askStep, (price, edge) => price <= edge, bookEnds);
-        return new DepthCurve(mid, low, high, bidSums, askSums, bidSteps, askSteps, label);
+
+        // Without a captured boundary (still syncing) nothing can be vouched for.
+        var bidReliable = 0;
+        var askReliable = 0;
+        while (boundary is not null && bidReliable < Steps && boundary.CoversBid(mid - (bidReliable + 1) * bidStep))
+        {
+            bidReliable++;
+        }
+
+        while (boundary is not null && askReliable < Steps && boundary.CoversAsk(mid + (askReliable + 1) * askStep))
+        {
+            askReliable++;
+        }
+
+        return new DepthCurve(mid, low, high, bidSums, askSums, bidSteps, askSteps, label)
+        {
+            BidReliable = bidReliable,
+            AskReliable = askReliable,
+            Boundary = boundary,
+        };
     }
 
     private static (decimal[] Cumulative, int Covered) Accumulate(
@@ -245,4 +275,20 @@ public sealed class RowsRange
 
         return (mid - Math.Max(bidSpan * 1.03m, minSpan), mid + Math.Max(askSpan * 1.03m, minSpan));
     }
+}
+
+// Price range covered by the REST snapshot the local book was last synced from (Binance sends
+// at most 5000 levels per side on spot and 1000 on futures, often only ±0.2% of price on
+// futures). Inside it the book is complete; outside it a level is only known once it has changed
+// since SyncedUtc, so resting orders that haven't moved are missing.
+public sealed record SnapshotBoundary(decimal LowestBid, decimal HighestAsk, DateTime SyncedUtc)
+{
+    public bool CoversBid(decimal price) => price >= LowestBid;
+
+    public bool CoversAsk(decimal price) => price <= HighestAsk;
+
+    // How far below / above mid the snapshot reaches, in percent (0 once price has moved past it).
+    public decimal BidReachPercent(decimal mid) => mid > 0 ? Math.Max(0, (mid - LowestBid) / mid * 100m) : 0;
+
+    public decimal AskReachPercent(decimal mid) => mid > 0 ? Math.Max(0, (HighestAsk - mid) / mid * 100m) : 0;
 }

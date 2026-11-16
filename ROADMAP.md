@@ -87,6 +87,7 @@ Users have to know whether they can trust the numbers they are looking at.
   - "Last update" age on each panel.
   - A small global status indicator in the nav.
   - A `/health` endpoint (ASP.NET Core health checks) reporting the state of each feed.
+- Done: the panel header shows how far the sync snapshot reaches and how long deeper levels have been learned from live updates. Data beyond the snapshot is marked (dimmed rows, a faint chart segment, "≥" depth figures). Binance snapshots only 1000 levels on futures, often just ±0.2% of price.
 
 ### 7. Depth chart ✅
 
