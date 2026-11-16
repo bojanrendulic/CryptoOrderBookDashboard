@@ -98,7 +98,7 @@ The classic cumulative bid/ask "V" chart next to the order book. Total liquidity
   - It is drawn as inline SVG and refreshed at most once a second.
   - It is shown by default and can be collapsed.
 - Possible follow-ups:
-  - a hover crosshair with the exact price and cumulative size
+  - ✅ a hover crosshair showing the price, the distance from mid and the cumulative USD at that point, computed in the browser
   - a log scale option
   - hiding the chart by default and opening it with a button
 

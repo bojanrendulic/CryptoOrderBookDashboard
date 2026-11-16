@@ -1,24 +1,32 @@
 @using System.Globalization
 @using System.Text
+@implements IAsyncDisposable
+@inject IJSRuntime JS
 
 @* Cumulative bid/ask depth ("V" chart) within ±X% of mid. Plain SVG stretched to the panel width;
-   all text lives in HTML around it, because a non-uniformly scaled SVG would distort glyphs. *@
+   all text lives in HTML around it, because a non-uniformly scaled SVG would distort glyphs.
+   The hover crosshair/tooltip is drawn entirely in the browser (DepthChart.razor.js) from the
+   data-curve attribute, so moving the mouse never round-trips to the server. *@
 <div class="depth-chart">
     <div class="depth-chart-max">max @MaxLabel</div>
-    <svg class="depth-chart-svg" viewBox="0 0 @F(Width) @F(Height)" preserveAspectRatio="none"
-         role="img" aria-label="@AriaLabel">
-        <line class="mid-line" x1="@F(Width / 2)" x2="@F(Width / 2)" y1="0" y2="@F(Height)" />
-        @if (Curve.BidSteps > 0)
-        {
-            <path class="area-bid" d="@AreaPath(Curve.Bids, Curve.BidSteps, -1)" />
-            <path class="line-bid" d="@LinePath(Curve.Bids, Curve.BidSteps, -1)" />
-        }
-        @if (Curve.AskSteps > 0)
-        {
-            <path class="area-ask" d="@AreaPath(Curve.Asks, Curve.AskSteps, 1)" />
-            <path class="line-ask" d="@LinePath(Curve.Asks, Curve.AskSteps, 1)" />
-        }
-    </svg>
+    <div class="depth-chart-plot" @ref="_plot">
+        <svg class="depth-chart-svg" viewBox="0 0 @F(Width) @F(Height)" preserveAspectRatio="none"
+             role="img" aria-label="@AriaLabel" data-curve="@CurveData">
+            <line class="mid-line" x1="@F(Width / 2)" x2="@F(Width / 2)" y1="0" y2="@F(Height)" />
+            @if (Curve.BidSteps > 0)
+            {
+                <path class="area-bid" d="@AreaPath(Curve.Bids, Curve.BidSteps, -1)" />
+                <path class="line-bid" d="@LinePath(Curve.Bids, Curve.BidSteps, -1)" />
+            }
+            @if (Curve.AskSteps > 0)
+            {
+                <path class="area-ask" d="@AreaPath(Curve.Asks, Curve.AskSteps, 1)" />
+                <path class="line-ask" d="@LinePath(Curve.Asks, Curve.AskSteps, 1)" />
+            }
+        </svg>
+        @* Owned by JS: Blazor never renders children here, so the overlay survives re-renders. *@
+        <div class="depth-chart-overlay"></div>
+    </div>
     <div class="depth-chart-axis">
         <span>@DisplayFormat.Number(RoundPrice(Curve.Mid * (1 - Curve.Percent / 100m)))</span>
         <span>Mid @DisplayFormat.Number(RoundPrice(Curve.Mid))</span>
@@ -37,7 +45,79 @@
     [Parameter, EditorRequired]
     public DepthCurve Curve { get; set; } = default!;
 
+    private ElementReference _plot;
+    private IJSObjectReference? _module;
+
     private decimal Scale => Curve.MaxUsd > 0 ? Curve.MaxUsd * 1.05m : 1m;
+
+    // "mid;percent;scale;bidSteps;askSteps;bids…;asks…" with comma-separated whole-dollar sums.
+    // Changes only when the curve does (at most once a second), like the paths themselves.
+    private string CurveData
+    {
+        get
+        {
+            var sb = new StringBuilder();
+            sb.Append(Curve.Mid.ToString(CultureInfo.InvariantCulture)).Append(';')
+                .Append(Curve.Percent.ToString(CultureInfo.InvariantCulture)).Append(';')
+                .Append(Math.Round(Scale).ToString(CultureInfo.InvariantCulture)).Append(';')
+                .Append(Curve.BidSteps).Append(';')
+                .Append(Curve.AskSteps).Append(';');
+            AppendSums(sb, Curve.Bids, Curve.BidSteps);
+            sb.Append(';');
+            AppendSums(sb, Curve.Asks, Curve.AskSteps);
+            return sb.ToString();
+        }
+    }
+
+    private static void AppendSums(StringBuilder sb, IReadOnlyList<decimal> values, int count)
+    {
+        for (var i = 0; i < count; i++)
+        {
+            if (i > 0)
+            {
+                sb.Append(',');
+            }
+
+            sb.Append(Math.Round(values[i]).ToString(CultureInfo.InvariantCulture));
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        try
+        {
+            _module = await JS.InvokeAsync<IJSObjectReference>(
+                "import", "./Components/OrderBook/DepthChart.razor.js");
+            await _module.InvokeVoidAsync("attach", _plot);
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit went away before the chart finished initialising.
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_module is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _module.InvokeVoidAsync("detach", _plot);
+            await _module.DisposeAsync();
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit already gone - the DOM and its listeners went with it.
+        }
+    }
 
     private string MaxLabel => DisplayFormat.CompactUsd(Curve.MaxUsd);
 

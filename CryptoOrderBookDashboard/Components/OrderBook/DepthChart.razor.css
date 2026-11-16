@@ -69,3 +69,79 @@
 .line-ask {
     stroke: #ff6b6b;
 }
+
+.depth-chart-plot {
+    position: relative;
+    cursor: crosshair;
+    touch-action: pan-y;
+}
+
+/* Everything inside the overlay is created by DepthChart.razor.js, hence ::deep. */
+.depth-chart-overlay {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    display: none;
+}
+
+.depth-chart-overlay.active {
+    display: block;
+}
+
+.depth-chart-overlay ::deep .dc-vline {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    border-left: 1px dashed #aaa;
+}
+
+.depth-chart-overlay ::deep .dc-hline {
+    position: absolute;
+    border-top: 1px dashed #777;
+}
+
+.depth-chart-overlay ::deep .dc-dot {
+    position: absolute;
+    width: 8px;
+    height: 8px;
+    margin: -4px 0 0 -4px;
+    border-radius: 50%;
+    border: 1px solid #111;
+}
+
+.depth-chart-overlay.bid ::deep .dc-dot {
+    background-color: #4caf50;
+}
+
+.depth-chart-overlay.ask ::deep .dc-dot {
+    background-color: #ff6b6b;
+}
+
+.depth-chart-overlay ::deep .dc-tip {
+    position: absolute;
+    z-index: 2;
+    padding: 0.25rem 0.5rem;
+    border: 1px solid #333;
+    border-radius: 4px;
+    background-color: rgba(20, 20, 20, 0.95);
+    color: #eee;
+    font-size: 0.75rem;
+    white-space: nowrap;
+}
+
+.depth-chart-overlay ::deep .dc-k {
+    color: #888;
+    margin-right: 0.3rem;
+}
+
+.depth-chart-overlay ::deep .dc-pct {
+    color: #888;
+}
+
+.depth-chart-overlay.bid ::deep .dc-v {
+    color: #4caf50;
+}
+
+.depth-chart-overlay.ask ::deep .dc-v {
+    color: #ff6b6b;
+}
