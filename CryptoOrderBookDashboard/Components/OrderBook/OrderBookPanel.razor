@@ -22,12 +22,12 @@
         }
     </div>
 
-    @if (_snapshot.Depth is { } depth)
+    @if (_depth is { } depth)
     {
         var bidPct = (double)(depth.BidShare * 100);
         var prefix = depth.Complete ? "" : "≥ ";
         <div class="depth-summary" title="@DepthTitle(depth)">
-            <span class="depth-label">Depth @DepthBand.FormatLabel(depth.Percent)</span>
+            <span class="depth-label">Depth @depth.Label</span>
             <span class="depth-bids">@prefix@FormatNotional(depth.BidsUsd)</span>
             <div class="depth-imbalance">
                 <div class="depth-imbalance-bids" style="width:@(FormatPercent(bidPct))%"></div>
@@ -113,11 +113,17 @@
     [Parameter]
     public decimal? DepthPercent { get; set; }
 
+    // "Rows" depth mode: bar and chart follow the visible rows instead of a ±% band.
+    [Parameter]
+    public bool DepthFollowsRows { get; set; }
+
     // The depth chart refreshes at most once a second: the eye can't follow faster, and each
-    // refresh changes two SVG paths in the SignalR diff.
+    // refresh changes the SVG paths in the SignalR diff.
     private const long CurveRefreshMilliseconds = 1000;
 
     private DepthCurve? _curve;
+    private DepthSummary? _depth;
+    private readonly RowsRange _rowsRange = new();
     private bool _showChart = true;
     private string? _curveKey;
     private long _curveTicks;
@@ -214,23 +220,90 @@
         // sees a newer version and refreshes again rather than missing the update.
         var version = Store.GetVersion(_key);
         Volatile.Write(ref _renderedVersion, version);
-        _snapshot = Store.GetSnapshot(_key, levels, MinNotionalUsd, MaxNotionalUsd, GroupPercent, DepthPercent);
+        _snapshot = Store.GetSnapshot(_key, levels, MinNotionalUsd, MaxNotionalUsd, GroupPercent, EffectiveDepthPercent);
+        _depth = RowsMode ? RowsSummary(_snapshot) : _snapshot.Depth;
         RefreshCurve(version);
+    }
+
+    // Rows mode only makes sense with a size filter: unfiltered rows are just the top few levels.
+    private bool RowsMode => DepthFollowsRows && (MinNotionalUsd is not null || MaxNotionalUsd is not null);
+
+    private decimal? EffectiveDepthPercent =>
+        RowsMode ? null : DepthPercent ?? (DepthFollowsRows ? DepthBand.RowsFallbackPercent : null);
+
+    // In Rows mode the bar sums exactly the rows the chart draws: the visible rows within
+    // ±RowsMaxPercent of mid, so bar, chart and table all tell the same story.
+    private static DepthSummary? RowsSummary(OrderBookSnapshot snapshot)
+    {
+        if (snapshot is not { BestBid: { } bestBid, BestAsk: { } bestAsk })
+        {
+            return null;
+        }
+
+        var (bids, asks) = RowsWithinCap(snapshot, (bestBid + bestAsk) / 2);
+        return new DepthSummary(
+            "Rows",
+            bids.Sum(l => l.Price * l.Quantity),
+            asks.Sum(l => l.Price * l.Quantity),
+            Complete: true);
+    }
+
+    private static (List<PriceLevel> Bids, List<PriceLevel> Asks) RowsWithinCap(OrderBookSnapshot snapshot, decimal mid)
+    {
+        var floor = mid * (1 - DepthBand.RowsMaxPercent / 100m);
+        var ceiling = mid * (1 + DepthBand.RowsMaxPercent / 100m);
+        return (
+            snapshot.Bids.Where(l => l.Price >= floor).ToList(),
+            snapshot.Asks.Where(l => l.Price <= ceiling).ToList());
     }
 
     private void RefreshCurve(long version)
     {
-        // A new symbol, market or band must show immediately; otherwise wait for the 1s cadence.
-        var curveKey = $"{Market}:{Symbol}:{DepthPercent}";
+        // A new symbol, market, band or row filter must show immediately; otherwise wait for the
+        // 1s cadence.
+        var curveKey = RowsMode
+            ? $"{Market}:{Symbol}:rows:{MinNotionalUsd}:{MaxNotionalUsd}:{GroupPercent}"
+            : $"{Market}:{Symbol}:{EffectiveDepthPercent}";
         if (curveKey == _curveKey && !CurveIsDue(version))
         {
             return;
         }
 
+        if (curveKey != _curveKey)
+        {
+            _rowsRange.Reset();
+        }
+
         _curveKey = curveKey;
-        _curve = _showChart && DepthPercent is { } percent ? Store.GetDepthCurve(_key, percent) : null;
+        _curve = !_showChart ? null
+            : RowsMode ? BuildRowsCurve(_snapshot)
+            : EffectiveDepthPercent is { } percent ? Store.GetDepthCurve(_key, percent)
+            : null;
         Volatile.Write(ref _curveTicks, Environment.TickCount64);
         Volatile.Write(ref _curveVersion, version);
+    }
+
+    // Built per viewer from the (at most 200) visible rows - cheap, and the axis range has
+    // per-viewer hysteresis anyway.
+    private DepthCurve? BuildRowsCurve(OrderBookSnapshot snapshot)
+    {
+        if (snapshot is not { BestBid: { } bestBid, BestAsk: { } bestAsk })
+        {
+            return null;
+        }
+
+        var mid = (bestBid + bestAsk) / 2;
+        var (bids, asks) = RowsWithinCap(snapshot, mid);
+        if (bids.Count == 0 && asks.Count == 0)
+        {
+            return null;
+        }
+
+        var (low, high) = _rowsRange.Update(mid, bids, asks);
+        return DepthCurve.Build(mid, low, high, bids, asks, bookEnds: false, "Rows") with
+        {
+            RowsBeyondCap = snapshot.Bids.Count + snapshot.Asks.Count - bids.Count - asks.Count,
+        };
     }
 
     private bool CurveIsDue(long version) =>
@@ -253,8 +326,11 @@
 
     private static string FormatNotional(decimal value) => DisplayFormat.CompactUsd(value);
 
-    private static string DepthTitle(DepthSummary depth) =>
-        $"Resting bid and ask liquidity within {DepthBand.FormatLabel(depth.Percent)} of mid."
+    private string DepthTitle(DepthSummary depth) =>
+        depth.Label == "Rows"
+            ? $"Sum of the visible rows within ±{DepthBand.RowsMaxPercent:0}% of mid - the same rows the chart and table show."
+            : $"Resting bid and ask liquidity within {depth.Label} of mid."
+            + (DepthFollowsRows ? " Rows mode needs a Min size filter, so this falls back to a band." : "")
         + (depth.Complete ? "" : " The local book does not reach the edge of this band, so these are lower bounds.");
 
     private static string FormatPercent(double value) => DisplayFormat.Percent(value);

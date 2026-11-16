@@ -101,6 +101,7 @@ The classic cumulative bid/ask "V" chart next to the order book. Total liquidity
   - ✅ a hover crosshair showing the price, the distance from mid and the cumulative USD at that point, computed in the browser
   - a log scale option
   - hiding the chart by default and opening it with a button
+- Done: a "Rows" option in the Depth selector. The chart and depth bar then follow the visible rows (Min size, Group), on a linear axis from the lowest to the highest row, capped at ±50% of mid. The axis widens immediately and only shrinks after 10s.
 
 ### 8. Order book heatmap over time ⬜
 

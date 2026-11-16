@@ -69,17 +69,19 @@ function render(state) {
         return;
     }
 
+    // Linear price axis from low to high; mid need not be centred (Rows mode).
     const x = Math.min(Math.max(state.lastX - rect.left, 0), rect.width);
-    const offset = x / rect.width - 0.5;          // -0.5 .. 0.5, 0 = mid
-    const isBid = offset < 0;
-    const distance = Math.abs(offset) * 2;        // 0 .. 1 of the band
+    const price = curve.low + (x / rect.width) * (curve.high - curve.low);
+    const isBid = price < curve.mid;
+    const span = isBid ? curve.mid - curve.low : curve.high - curve.mid;
+    const distance = span > 0 ? Math.abs(price - curve.mid) / span : 0;   // 0 .. 1 of this side
     const index = Math.min(STEPS - 1, Math.floor(distance * STEPS));
     const values = isBid ? curve.bids : curve.asks;
     const covered = isBid ? curve.bidSteps : curve.askSteps;
-    const pctFromMid = (isBid ? -1 : 1) * distance * curve.percent;
-    const price = curve.mid * (1 + pctFromMid / 100);
+    const pctFromMid = ((price - curve.mid) / curve.mid) * 100;
     const hasData = index < covered;
     const value = hasData ? values[index] : null;
+    const midX = (rect.width * (curve.mid - curve.low)) / (curve.high - curve.low);
 
     state.overlay.classList.add("active");
     state.overlay.classList.toggle("bid", isBid);
@@ -88,7 +90,6 @@ function render(state) {
 
     if (hasData) {
         const y = rect.height * (1 - value / curve.scale);
-        const midX = rect.width / 2;
         state.hline.style.display = "";
         state.dot.style.display = "";
         state.hline.style.top = `${y}px`;
@@ -131,19 +132,20 @@ function readCurve(state) {
     }
 
     const parts = raw.split(";");
-    if (parts.length < 7) {
+    if (parts.length < 8) {
         return null;
     }
 
     const list = s => (s ? s.split(",").map(Number) : []);
     state.curve = {
         mid: Number(parts[0]),
-        percent: Number(parts[1]),
-        scale: Number(parts[2]) || 1,
-        bidSteps: Number(parts[3]),
-        askSteps: Number(parts[4]),
-        bids: list(parts[5]),
-        asks: list(parts[6]),
+        low: Number(parts[1]),
+        high: Number(parts[2]),
+        scale: Number(parts[3]) || 1,
+        bidSteps: Number(parts[4]),
+        askSteps: Number(parts[5]),
+        bids: list(parts[6]),
+        asks: list(parts[7]),
     };
     return state.curve;
 }

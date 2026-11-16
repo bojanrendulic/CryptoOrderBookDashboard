@@ -36,7 +36,8 @@
             <div class="col-md-6">
                 <OrderBookPanel Market="@market" Symbol="@tracked.Symbol"
                                 MinNotionalUsd="_selectedRange.Min" MaxNotionalUsd="_selectedRange.Max"
-                                GroupPercent="_grouping.Percent" DepthPercent="_depth.Percent" />
+                                GroupPercent="_grouping.Percent" DepthPercent="_depth.Percent"
+                                DepthFollowsRows="_depth.Percent is null" />
             </div>
         }
     </div>

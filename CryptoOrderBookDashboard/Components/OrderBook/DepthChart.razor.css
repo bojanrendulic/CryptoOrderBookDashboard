@@ -12,11 +12,10 @@
     border-radius: 4px;
 }
 
-/* Top centre: next to mid the cumulative curves are at their lowest, so this never overlaps them. */
+/* Pinned to mid (see LabelFraction): next to mid the curves are at their lowest. */
 .depth-chart-max {
     position: absolute;
     top: 0.2rem;
-    left: 50%;
     transform: translateX(-50%);
     z-index: 1;
     padding: 0 0.3rem;
@@ -26,6 +25,7 @@
 }
 
 .depth-chart-axis {
+    position: relative;
     display: flex;
     justify-content: space-between;
     color: #888;
@@ -144,4 +144,15 @@
 
 .depth-chart-overlay.ask ::deep .dc-v {
     color: #ff6b6b;
+}
+
+.axis-mid {
+    position: absolute;
+    top: 0;
+    transform: translateX(-50%);
+    white-space: nowrap;
+}
+
+.axis-pct {
+    color: #666;
 }

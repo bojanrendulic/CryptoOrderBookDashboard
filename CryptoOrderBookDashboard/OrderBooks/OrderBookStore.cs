@@ -172,45 +172,15 @@ public sealed class OrderBookStore
         return book.Curves.GetOrAdd(percent, p => ComputeCurve(book, mid, p));
     }
 
-    private static DepthCurve ComputeCurve(CachedBook book, decimal mid, decimal percent)
-    {
-        var stepWidth = mid * percent / 100m / DepthCurve.Steps;
-        var (bids, bidSteps) = Accumulate(book.Bids, i => mid - (i + 1) * stepWidth, (price, edge) => price >= edge);
-        var (asks, askSteps) = Accumulate(book.Asks, i => mid + (i + 1) * stepWidth, (price, edge) => price <= edge);
-        return new DepthCurve(percent, mid, bids, asks, bidSteps, askSteps);
-    }
-
-    // Walks one side best-first in a single pass. A point is only "covered" if the local book
-    // reaches at least to its edge price; past the book's last level the sum is unknown.
-    private static (decimal[] Cumulative, int Covered) Accumulate(
-        PriceLevel[] levels,
-        Func<int, decimal> edgeAt,
-        Func<decimal, decimal, bool> isInside)
-    {
-        var cumulative = new decimal[DepthCurve.Steps];
-        var lastPrice = levels[^1].Price;
-        var covered = 0;
-        var sum = 0m;
-        var index = 0;
-
-        for (var i = 0; i < DepthCurve.Steps; i++)
-        {
-            var edge = edgeAt(i);
-            while (index < levels.Length && isInside(levels[index].Price, edge))
-            {
-                sum += levels[index].Price * levels[index].Quantity;
-                index++;
-            }
-
-            cumulative[i] = sum;
-            if (!isInside(lastPrice, edge))
-            {
-                covered = i + 1;
-            }
-        }
-
-        return (cumulative, covered);
-    }
+    private static DepthCurve ComputeCurve(CachedBook book, decimal mid, decimal percent) =>
+        DepthCurve.Build(
+            mid,
+            mid * (1 - percent / 100m),
+            mid * (1 + percent / 100m),
+            book.Bids,
+            book.Asks,
+            bookEnds: true,
+            DepthBand.FormatLabel(percent));
 
     private static DepthSummary ComputeDepth(CachedBook book, decimal mid, decimal percent)
     {
@@ -243,7 +213,7 @@ public sealed class OrderBookStore
         var complete = book.Bids.Length > 0 && book.Bids[^1].Price < lowerBound
             && book.Asks.Length > 0 && book.Asks[^1].Price > upperBound;
 
-        return new DepthSummary(percent, bidsUsd, asksUsd, complete);
+        return new DepthSummary(DepthBand.FormatLabel(percent), bidsUsd, asksUsd, complete);
     }
 
     // book.Book copies the whole (full-depth) book under the library's lock. Doing that per

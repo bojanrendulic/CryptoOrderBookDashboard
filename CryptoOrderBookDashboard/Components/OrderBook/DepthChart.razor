@@ -8,11 +8,11 @@
    The hover crosshair/tooltip is drawn entirely in the browser (DepthChart.razor.js) from the
    data-curve attribute, so moving the mouse never round-trips to the server. *@
 <div class="depth-chart">
-    <div class="depth-chart-max">max @MaxLabel</div>
+    <div class="depth-chart-max" style="left:@F(LabelFraction * 100)%">max @MaxLabel</div>
     <div class="depth-chart-plot" @ref="_plot">
         <svg class="depth-chart-svg" viewBox="0 0 @F(Width) @F(Height)" preserveAspectRatio="none"
              role="img" aria-label="@AriaLabel" data-curve="@CurveData">
-            <line class="mid-line" x1="@F(Width / 2)" x2="@F(Width / 2)" y1="0" y2="@F(Height)" />
+            <line class="mid-line" x1="@F(MidX)" x2="@F(MidX)" y1="0" y2="@F(Height)" />
             @if (Curve.BidSteps > 0)
             {
                 <path class="area-bid" d="@AreaPath(Curve.Bids, Curve.BidSteps, -1)" />
@@ -28,13 +28,20 @@
         <div class="depth-chart-overlay"></div>
     </div>
     <div class="depth-chart-axis">
-        <span>@DisplayFormat.Number(RoundPrice(Curve.Mid * (1 - Curve.Percent / 100m)))</span>
-        <span>Mid @DisplayFormat.Number(RoundPrice(Curve.Mid))</span>
-        <span>@DisplayFormat.Number(RoundPrice(Curve.Mid * (1 + Curve.Percent / 100m)))</span>
+        <span>@DisplayFormat.Number(RoundPrice(Curve.Low)) <span class="axis-pct">@PctFromMid(Curve.Low)</span></span>
+        @if (ShowMidLabel)
+        {
+            <span class="axis-mid" style="left:@F(MidFraction * 100)%">Mid @DisplayFormat.Number(RoundPrice(Curve.Mid))</span>
+        }
+        <span>@DisplayFormat.Number(RoundPrice(Curve.High)) <span class="axis-pct">@PctFromMid(Curve.High)</span></span>
     </div>
     @if (!Curve.Complete)
     {
         <div class="depth-chart-note">The local book ends inside this band; the curve stops where the data does.</div>
+    }
+    @if (Curve.RowsBeyondCap > 0)
+    {
+        <div class="depth-chart-note">@Curve.RowsBeyondCap row(s) beyond ±@DepthBand.RowsMaxPercent.ToString("0", CultureInfo.InvariantCulture)% of mid are listed below but left out of the chart and the depth bar.</div>
     }
 </div>
 
@@ -50,7 +57,7 @@
 
     private decimal Scale => Curve.MaxUsd > 0 ? Curve.MaxUsd * 1.05m : 1m;
 
-    // "mid;percent;scale;bidSteps;askSteps;bids…;asks…" with comma-separated whole-dollar sums.
+    // "mid;low;high;scale;bidSteps;askSteps;bids…;asks…" with comma-separated whole-dollar sums.
     // Changes only when the curve does (at most once a second), like the paths themselves.
     private string CurveData
     {
@@ -58,7 +65,8 @@
         {
             var sb = new StringBuilder();
             sb.Append(Curve.Mid.ToString(CultureInfo.InvariantCulture)).Append(';')
-                .Append(Curve.Percent.ToString(CultureInfo.InvariantCulture)).Append(';')
+                .Append(Curve.Low.ToString(CultureInfo.InvariantCulture)).Append(';')
+                .Append(Curve.High.ToString(CultureInfo.InvariantCulture)).Append(';')
                 .Append(Math.Round(Scale).ToString(CultureInfo.InvariantCulture)).Append(';')
                 .Append(Curve.BidSteps).Append(';')
                 .Append(Curve.AskSteps).Append(';');
@@ -122,10 +130,27 @@
     private string MaxLabel => DisplayFormat.CompactUsd(Curve.MaxUsd);
 
     private string AriaLabel =>
-        $"Cumulative depth within {DepthBand.FormatLabel(Curve.Percent)} of mid, up to {MaxLabel}";
+        $"Cumulative depth ({Curve.Label}) from {RoundPrice(Curve.Low)} to {RoundPrice(Curve.High)}, up to {MaxLabel}";
 
-    private double X(int step, int direction) =>
-        Width / 2 + direction * (step + 1) * (Width / 2) / DepthCurve.Steps;
+    // Linear price axis from Low to High; mid sits wherever it falls (centred in ±% mode).
+    private double MidFraction => Curve.High > Curve.Low ? (double)((Curve.Mid - Curve.Low) / (Curve.High - Curve.Low)) : 0.5;
+
+    private double MidX => Width * MidFraction;
+
+    // Near an edge the mid label would collide with the edge price label; the dashed mid line
+    // and the panel header still show where mid is.
+    private bool ShowMidLabel => MidFraction is >= 0.2 and <= 0.8;
+
+    // Labels pinned to mid, kept clear of the edge labels. Next to mid the curves are at their
+    // lowest, so the "max" label there never covers them.
+    private double LabelFraction => Math.Clamp(MidFraction, 0.15, 0.85);
+
+    private double StepWidth(int direction) => (direction < 0 ? MidX : Width - MidX) / DepthCurve.Steps;
+
+    private double X(int step, int direction) => MidX + direction * (step + 1) * StepWidth(direction);
+
+    private string PctFromMid(decimal price) =>
+        Curve.Mid > 0 ? DisplayFormat.SignedPercent((price - Curve.Mid) / Curve.Mid * 100m, 1) : "";
 
     private double Y(decimal cumulative) => Height - (double)(cumulative / Scale) * Height;
 
@@ -134,13 +159,13 @@
     private string LinePath(IReadOnlyList<decimal> values, int count, int direction)
     {
         var sb = new StringBuilder();
-        sb.Append("M").Append(F(Width / 2)).Append(' ').Append(F(Height));
+        sb.Append("M").Append(F(MidX)).Append(' ').Append(F(Height));
         var previousY = Height;
         for (var i = 0; i < count; i++)
         {
             var x = X(i, direction);
             var y = Y(values[i]);
-            sb.Append(" H").Append(F(x - direction * (Width / 2) / DepthCurve.Steps));
+            sb.Append(" H").Append(F(x - direction * StepWidth(direction)));
             if (y != previousY)
             {
                 sb.Append(" V").Append(F(y));
