@@ -1,3 +1,4 @@
 <Solution>
+  <Project Path="CryptoOrderBookDashboard.Tests/CryptoOrderBookDashboard.Tests.csproj" />
   <Project Path="CryptoOrderBookDashboard/CryptoOrderBookDashboard.csproj" />
 </Solution>

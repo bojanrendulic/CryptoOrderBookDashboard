@@ -9,6 +9,12 @@
 
   <ItemGroup>
     <PackageReference Include="Binance.Net" Version="13.3.0" />
+    <PackageReference Include="Dapper" Version="2.1.89" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="11.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="CryptoOrderBookDashboard.Tests" />
   </ItemGroup>
 
 </Project>

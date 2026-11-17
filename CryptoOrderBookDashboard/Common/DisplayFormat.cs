@@ -33,6 +33,12 @@ public static class DisplayFormat
         _ => "$" + value.ToString("0", CultureInfo.InvariantCulture),
     };
 
+    // Compact elapsed time: "45s", "12m", "5h 12m".
+    public static string Duration(TimeSpan span) =>
+        span.TotalMinutes < 1 ? $"{(int)Math.Max(0, span.TotalSeconds)}s"
+        : span.TotalHours < 1 ? $"{(int)span.TotalMinutes}m"
+        : $"{(int)span.TotalHours}h {span.Minutes}m";
+
     public static string Countdown(TimeSpan remaining) =>
         remaining <= TimeSpan.Zero
             ? "settling…"

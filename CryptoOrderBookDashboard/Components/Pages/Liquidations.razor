@@ -1,0 +1,259 @@
+@page "/liquidations"
+@implements IDisposable
+@inject LiquidationStore Store
+@inject IOptions<OrderBookDashboardOptions> Options
+@inject IOptions<LiquidationOptions> LiquidationSettings
+
+<PageTitle>Liquidations</PageTitle>
+
+<div class="liq-page">
+    <div class="liq-header">
+        <span class="liq-status @(_summary.Connected ? "live" : "down")">@(_summary.Connected ? "LIVE" : "DISCONNECTED")</span>
+        <span>USDT-M perpetuals</span>
+        <span class="liq-sampled" title="@SampledTitle">sampled</span>
+        <span class="liq-coverage">@CoverageText</span>
+        @if (_summary.Gaps.Count > 0)
+        {
+            <span class="liq-gaps" title="@GapsTitle">@_summary.Gaps.Count gap(s) in the last 24h</span>
+        }
+    </div>
+
+    <div class="liq-cards">
+        <LiquidationWindowCard Title="Last 1h" Window="_summary.Hour" />
+        <LiquidationWindowCard Title="Last 24h" Window="_summary.Day" />
+
+        <div class="liq-card">
+            <div class="liq-card-title" title="@PressureTitle">Sampling pressure (1h)</div>
+            @if (_summary.Pressure.Count == 0)
+            {
+                <div class="liq-muted liq-small">No symbol had liquidations in consecutive seconds since this app started - the sample is probably close to complete.</div>
+            }
+            else
+            {
+                <div class="liq-muted liq-small">Consecutive seconds with a liquidation; each likely hid more.</div>
+                <table class="liq-mini">
+                    @foreach (var p in _summary.Pressure)
+                    {
+                        <tr>
+                            <td class="sym">@p.Symbol</td>
+                            <td class="num">@p.SaturatedSeconds saturated</td>
+                            <td class="num liq-muted">of @p.ActiveSeconds s</td>
+                        </tr>
+                    }
+                </table>
+            }
+        </div>
+    </div>
+
+    <div class="liq-body">
+        <div class="liq-tape-wrap">
+            <div class="liq-controls">
+                <input type="search" class="form-control w-auto" placeholder="Symbol…" @bind="_search" @bind:event="oninput" @bind:after="Refresh" aria-label="Search symbol" />
+                <select class="form-select w-auto" @bind="_scope" @bind:after="Refresh" aria-label="Scope">
+                    <option value="all">All symbols</option>
+                    <option value="tracked">Tracked symbols</option>
+                </select>
+                <select class="form-select w-auto" @bind="_sizeKey" @bind:after="Refresh" aria-label="Minimum size">
+                    @foreach (var range in NotionalRange.MinimumPresets)
+                    {
+                        <option value="@range.Key">@range.Label</option>
+                    }
+                </select>
+                <select class="form-select w-auto" @bind="_side" @bind:after="Refresh" aria-label="Side">
+                    <option value="all">Longs and shorts</option>
+                    <option value="long">Long liquidations</option>
+                    <option value="short">Short liquidations</option>
+                </select>
+            </div>
+
+            <div class="liq-tape">
+                <table class="liq-table">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Symbol</th>
+                            <th>Side</th>
+                            <th class="num">Size</th>
+                            <th class="num">Price</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var e in _tape)
+                        {
+                            <tr class="@(e.Side == LiquidatedSide.Long ? "long" : "short") size-tier-@Notional.SizeTier(e.UsdValue) @(e.Restored ? "restored" : "")"
+                                title="@(e.Restored ? RestoredTitle : null)">
+                                <td class="time">@e.TimeUtc.ToLocalTime().ToString(e.TimeUtc.Date == DateTime.UtcNow.Date ? "HH:mm:ss" : "dd.MM. HH:mm:ss")</td>
+                                <td class="sym">@e.Symbol</td>
+                                <td class="side">@(e.Side == LiquidatedSide.Long ? "Long liq." : "Short liq.")</td>
+                                <td class="num usd">@DisplayFormat.CompactUsd(e.UsdValue)</td>
+                                <td class="num">@DisplayFormat.Number(e.Price)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                @if (_tape.Count == 0)
+                {
+                    <div class="liq-empty">No liquidations match the filter yet.</div>
+                }
+            </div>
+            <div class="liq-muted liq-small">
+                Showing the latest @_tape.Count (max @TapeSize). Faded rows were restored after a restart: only liquidations of
+                @DisplayFormat.CompactUsd(LiquidationSettings.Value.MinPersistUsd)+ are stored individually.
+            </div>
+        </div>
+
+        <div class="liq-top">
+            <div class="liq-card-title">Top symbols (24h, sampled)</div>
+            <table class="liq-table">
+                <thead>
+                    <tr>
+                        <th>Symbol</th>
+                        <th class="num">Longs</th>
+                        <th class="num">Shorts</th>
+                        <th class="num">Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var s in _summary.TopSymbols)
+                    {
+                        <tr class="clickable" @onclick="() => FilterSymbol(s.Symbol)" title="Show only @s.Symbol in the tape">
+                            <td class="sym">@s.Symbol</td>
+                            <td class="num long-text">@AtLeast(s.LongUsd)</td>
+                            <td class="num short-text">@AtLeast(s.ShortUsd)</td>
+                            <td class="num">≥ @DisplayFormat.CompactUsd(s.TotalUsd) <span class="liq-muted">(@s.Count)</span></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+            @if (_summary.TopSymbols.Count == 0)
+            {
+                <div class="liq-empty">Nothing yet.</div>
+            }
+        </div>
+    </div>
+
+    <details class="liq-help">
+        <summary>How to read this page</summary>
+        <ul>
+            <li><b>Long liquidation</b> (red): a leveraged long was force-closed by selling. Waves of them push price down. <b>Short liquidation</b> (green): a short was force-closed by buying, pushing price up.</li>
+            <li><b>Everything is a sample.</b> Binance publishes at most one liquidation per symbol per second (the latest). In a cascade hundreds can happen in a second and we see one, so totals are shown as lower bounds (≥) and are never exact.</li>
+            <li><b>Sampling pressure</b> lists symbols that had liquidations in consecutive seconds in the last hour. There the sample is weakest, and the real totals are likely much higher.</li>
+            <li><b>Coverage:</b> Binance has no public liquidation history, so only what this app received while connected is counted. After a restart the 1h/24h totals come back from the database (per-minute totals of every liquidation), but liquidations missed while disconnected or stopped are gone for good.</li>
+            <li>Sizes are average fill price × filled quantity, in USD.</li>
+        </ul>
+    </details>
+</div>
+
+@code {
+    private const int TapeSize = 200;
+    private const long RefreshMilliseconds = 1000;
+
+    private LiquidationSummary _summary = LiquidationSummary.Empty;
+    private IReadOnlyList<LiquidationEvent> _tape = [];
+    private HashSet<string> _tracked = [];
+
+    private string _search = string.Empty;
+    private string _scope = "all";
+    private string _sizeKey = NotionalRange.MinimumPresets[0].Key;
+    private string _side = "all";
+
+    private long _lastRefreshTicks;
+    private bool _disposed;
+
+    private const string SampledTitle =
+        "Binance sends at most one liquidation per symbol per second, so this is a sample: all totals are lower bounds.";
+
+    private const string PressureTitle =
+        "Seconds in the last hour in which a symbol had a liquidation right after another one. Binance only reports one per second, so these seconds very likely hid more liquidations.";
+
+    private const string RestoredTitle =
+        "Restored from the database after a restart. Only large liquidations are stored individually, so smaller ones from before the restart are not listed (they are still in the totals).";
+
+    protected override void OnInitialized()
+    {
+        _tracked = Options.Value.Symbols
+            .Where(s => s.GetMarkets().Contains(MarketType.UsdFutures))
+            .Select(s => s.Symbol)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        Refresh();
+        Store.Changed += OnStoreChanged;
+    }
+
+    // async void because it's an event handler - every exception must be caught here, since
+    // one escaping onto the thread pool would take down the whole process.
+    private async void OnStoreChanged()
+    {
+        if (_disposed || Environment.TickCount64 - Volatile.Read(ref _lastRefreshTicks) < RefreshMilliseconds)
+        {
+            return;
+        }
+
+        try
+        {
+            await InvokeAsync(() =>
+            {
+                Refresh();
+                StateHasChanged();
+            });
+        }
+        catch (ObjectDisposedException)
+        {
+            // Circuit was torn down between the pulse and this render.
+        }
+        catch (Exception ex)
+        {
+            await DispatchExceptionAsync(ex);
+        }
+    }
+
+    private void Refresh()
+    {
+        Volatile.Write(ref _lastRefreshTicks, Environment.TickCount64);
+        _summary = Store.GetSummary(DateTime.UtcNow);
+
+        var min = NotionalRange.FromKey(_sizeKey, NotionalRange.MinimumPresets).Min ?? 0m;
+        var search = _search.Trim();
+        var trackedOnly = _scope == "tracked";
+        LiquidatedSide? side = _side switch { "long" => LiquidatedSide.Long, "short" => LiquidatedSide.Short, _ => null };
+
+        _tape = Store.GetTape(
+            e => e.UsdValue >= min
+                && (side is null || e.Side == side)
+                && (!trackedOnly || _tracked.Contains(e.Symbol))
+                && (search.Length == 0 || e.Symbol.Contains(search, StringComparison.OrdinalIgnoreCase)),
+            TapeSize);
+    }
+
+    // Sampled totals are lower bounds; nothing seen is shown as a dash, not "≥ $0".
+    private static string AtLeast(decimal usd) => usd > 0 ? "≥ " + DisplayFormat.CompactUsd(usd) : "–";
+
+    private void FilterSymbol(string symbol)
+    {
+        _search = symbol;
+        Refresh();
+    }
+
+    private string CoverageText
+    {
+        get
+        {
+            if (_summary.CollectingSinceUtc is not { } since)
+            {
+                return "waiting for the first connection";
+            }
+
+            var age = DateTime.UtcNow - since;
+            return $"collecting since {since.ToLocalTime():dd.MM. HH:mm} ({DisplayFormat.Duration(age)})";
+        }
+    }
+
+    private string GapsTitle => string.Join(
+        Environment.NewLine,
+        _summary.Gaps.Select(g => $"{g.StartUtc.ToLocalTime():dd.MM. HH:mm:ss} – {g.EndUtc.ToLocalTime():HH:mm:ss} ({DisplayFormat.Duration(g.Duration)}) not received"));
+
+    public void Dispose()
+    {
+        _disposed = true;
+        Store.Changed -= OnStoreChanged;
+    }
+}

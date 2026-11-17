@@ -12,15 +12,16 @@ Ideas for taking the dashboard from "live order book viewer" to a full market-st
 | 2 | Long/short ratio | Market data | ✅ |
 | 3 | Bid/ask depth imbalance | Market data | ✅ |
 | 4 | Open interest vs price | Market data | 🟡 |
-| 5 | Liquidations feed | Market data | ⬜ |
+| 5 | Liquidations feed | Market data | ✅ |
 | 6 | Feed health and stale-data indicator | Reliability | 🟡 |
 | 7 | Depth chart | Visualization | ✅ |
 | 8 | Order book heatmap over time | Visualization | ⬜ |
 | 9 | Multi-symbol watchlist | Visualization | ⬜ |
 | 10 | Alerts | Product | ⬜ |
 | 11 | API weight / rate-limit monitor | Operations | ⬜ |
-| 12 | History and data retention | Architecture | ⬜ |
+| 12 | History and data retention | Architecture | 🟡 |
 | 13 | Shared state across instances (Redis) | Architecture | ⬜ |
+| 14 | Database of large trades | Architecture | ⬜ |
 
 ## Market data
 
@@ -61,7 +62,7 @@ Open interest (OI) is the total size of open positions. Read together with price
   - A price + OI chart over 24h–30d, using `/futures/data/openInterestHist`.
   - A label for the four quadrants above.
 
-### 5. Liquidations feed ⬜
+### 5. Liquidations feed ✅
 
 A live list of forced liquidations, in the style of Coinglass. Popular and visually striking.
 
@@ -71,6 +72,8 @@ A live list of forced liquidations, in the style of Coinglass. Popular and visua
   - A tape (time, symbol, side, size in USD, price) with a size filter.
   - Rolling 1h/24h long vs short liquidation totals.
   - Optionally, markers on the trade tape.
+- Done: the `/liquidations` page shows the tape (filters for size, symbol and side), 1h/24h long vs short totals, the top symbols over 24h, and "sampling pressure" (symbols with liquidations in consecutive seconds, where the sample is weakest). Everything is marked as sampled, with lower bounds (≥). The page also shows since when data has been collected and where the gaps are. Totals survive restarts through SQLite (#12).
+- Possible follow-up: markers on the trade tape and order book.
 
 ## Visualization and UX
 
@@ -151,7 +154,7 @@ Log how much Binance API weight the app uses. This is useful when debugging Bina
 - **Output:** record usage per endpoint and show it on a small internal page or in logs and metrics.
 - **Warnings:** warn before reaching the limit, and make background jobs back off.
 
-### 12. History and data retention ⬜
+### 12. History and data retention 🟡
 
 Store snapshots in a database (for example every 5 minutes) so trends can be shown over time, not just live:
 
@@ -168,6 +171,12 @@ Store snapshots in a database (for example every 5 minutes) so trends can be sho
 
 This is also the foundation for alerts (#10) and longer heatmap windows (#8).
 
+- Done:
+  - SQLite persistence layer: a single batched writer, WAL mode, `synchronous=NORMAL`, versioned migrations and daily retention (365 days by default).
+  - Liquidations are its first user.
+  - Covered by the first test project.
+- Next: depth/imbalance, funding and open interest snapshots.
+
 ### 13. Shared state across instances (Redis) ⬜
 
 Only needed if the app ever runs on more than one server:
@@ -177,3 +186,11 @@ Only needed if the app ever runs on more than one server:
 - Redis pub/sub replaces the in-process `Changed` event
 
 **Not needed while there is one node.** Running more than one instance today would also open duplicate Binance connections per instance. Keep the store interfaces narrow so this can be added later without touching components.
+
+### 14. Database of large trades ⬜
+
+Store large executed trades (the ones the 7/30-day historical search looks for) in SQLite, so they can be browsed and filtered by date, size and symbol without re-scanning Binance each time.
+
+- **Source:** a background job, or the historical search itself saving the matches it finds that aren't stored yet.
+- **Deduplication:** by Binance aggregate trade id (`UNIQUE(market, symbol, agg_id)`), so overlapping searches are harmless.
+- **Schema:** added later as a new migration; nothing needs to be reserved now.

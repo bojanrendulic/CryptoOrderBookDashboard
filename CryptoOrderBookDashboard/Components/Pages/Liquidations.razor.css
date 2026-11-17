@@ -1,0 +1,270 @@
+/* All rules go through ::deep so they also reach LiquidationWindowCard, which shares the classes. */
+
+.liq-page {
+    color: #eee;
+}
+
+.liq-page ::deep .liq-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+    color: #333;
+    font-size: 0.9rem;
+}
+
+.liq-page ::deep .liq-status {
+    padding: 0.1rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.7rem;
+    font-weight: 600;
+}
+
+.liq-page ::deep .liq-status.live {
+    background-color: #1e5b2e;
+    color: #b6f2c1;
+}
+
+.liq-page ::deep .liq-status.down {
+    background-color: #5b1e1e;
+    color: #f2b6b6;
+}
+
+.liq-page ::deep .liq-sampled {
+    padding: 0.05rem 0.45rem;
+    border-radius: 999px;
+    background-color: #3a3214;
+    color: #f2e3b6;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    cursor: help;
+}
+
+.liq-page ::deep .liq-coverage {
+    color: #666;
+}
+
+.liq-page ::deep .liq-gaps {
+    color: #a07d1c;
+    cursor: help;
+    text-decoration: underline dotted;
+}
+
+.liq-page ::deep .liq-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+.liq-page ::deep .liq-card,
+.liq-page ::deep .liq-top,
+.liq-page ::deep .liq-tape-wrap,
+.liq-page ::deep .liq-help {
+    border: 1px solid #333;
+    border-radius: 6px;
+    background-color: #111;
+    padding: 0.7rem 0.9rem;
+}
+
+.liq-page ::deep .liq-card-title {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.4rem;
+    color: #999;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.liq-page ::deep .liq-sides {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.liq-page ::deep .liq-sides .right {
+    text-align: right;
+}
+
+.liq-page ::deep .liq-label {
+    color: #999;
+    font-size: 0.75rem;
+}
+
+.liq-page ::deep .liq-value {
+    font-size: 1.3rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.liq-page ::deep .liq-bar {
+    height: 8px;
+    margin: 0.4rem 0;
+    border-radius: 4px;
+    overflow: hidden;
+    background-color: #2e7d32;
+}
+
+.liq-page ::deep .liq-bar-long {
+    height: 100%;
+    background-color: #c62828;
+}
+
+.liq-page ::deep .liq-coverage-note {
+    margin-top: 0.3rem;
+    color: #b8a76a;
+    font-size: 0.75rem;
+}
+
+.liq-page ::deep .long-text {
+    color: #ff6b6b;
+}
+
+.liq-page ::deep .short-text {
+    color: #4caf50;
+}
+
+.liq-page ::deep .liq-muted {
+    color: #888;
+}
+
+.liq-page ::deep .liq-small {
+    font-size: 0.75rem;
+}
+
+.liq-page ::deep .liq-mini {
+    width: 100%;
+    font-family: "Consolas", "Courier New", monospace;
+    font-size: 0.8rem;
+}
+
+.liq-page ::deep .liq-body {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+    gap: 0.75rem;
+}
+
+@media (max-width: 900px) {
+    .liq-page ::deep .liq-body {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+.liq-page ::deep .liq-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 0.6rem;
+}
+
+.liq-page ::deep .liq-tape {
+    max-height: calc(100vh - 380px);
+    min-height: 240px;
+    overflow-y: auto;
+    margin-bottom: 0.4rem;
+}
+
+.liq-page ::deep .liq-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: "Consolas", "Courier New", monospace;
+    font-size: 0.83rem;
+}
+
+.liq-page ::deep .liq-table th {
+    position: sticky;
+    top: 0;
+    background-color: #1a1a1a;
+    color: #aaa;
+    font-weight: 500;
+    padding: 0.3rem 0.5rem;
+    border-bottom: 1px solid #333;
+    text-align: left;
+    white-space: nowrap;
+}
+
+.liq-page ::deep .liq-table td {
+    padding: 0.15rem 0.5rem;
+    border-bottom: 1px solid #1e1e1e;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+.liq-page ::deep .num {
+    text-align: right;
+}
+
+.liq-page ::deep .time {
+    color: #888;
+}
+
+.liq-page ::deep .sym {
+    font-weight: 600;
+}
+
+.liq-page ::deep tr.long .side,
+.liq-page ::deep tr.long .usd {
+    color: #ff6b6b;
+}
+
+.liq-page ::deep tr.short .side,
+.liq-page ::deep tr.short .usd {
+    color: #4caf50;
+}
+
+/* Bigger liquidations stand out more, same tiers as the order book and trade tape. */
+.liq-page ::deep tr.size-tier-3 {
+    background-color: #181818;
+}
+
+.liq-page ::deep tr.size-tier-4 {
+    background-color: #221a12;
+}
+
+.liq-page ::deep tr.size-tier-5 {
+    background-color: #2c1d0f;
+    font-weight: 600;
+}
+
+.liq-page ::deep tr.restored {
+    opacity: 0.55;
+    font-style: italic;
+}
+
+.liq-page ::deep tr.clickable {
+    cursor: pointer;
+}
+
+.liq-page ::deep tr.clickable:hover {
+    background-color: #1b1b1b;
+}
+
+.liq-page ::deep .liq-empty {
+    padding: 1rem;
+    text-align: center;
+    color: #888;
+}
+
+.liq-page ::deep .liq-help {
+    margin-top: 1rem;
+    font-size: 0.88rem;
+    color: #ccc;
+}
+
+.liq-page ::deep .liq-help summary {
+    cursor: pointer;
+    color: #eee;
+}
+
+.liq-page ::deep .liq-help ul {
+    margin: 0.5rem 0 0;
+    padding-left: 1.2rem;
+}
+
+.liq-page ::deep .liq-help li {
+    margin-bottom: 0.35rem;
+}

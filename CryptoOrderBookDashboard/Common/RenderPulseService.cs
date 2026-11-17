@@ -1,4 +1,5 @@
 using CryptoOrderBookDashboard.Funding;
+using CryptoOrderBookDashboard.Liquidations;
 using CryptoOrderBookDashboard.OrderBooks;
 using CryptoOrderBookDashboard.OrderBooks.Configuration;
 using CryptoOrderBookDashboard.Trades;
@@ -12,7 +13,8 @@ public sealed class RenderPulseService(
     IOptions<OrderBookDashboardOptions> options,
     OrderBookStore orderBookStore,
     TradeStore tradeStore,
-    FundingStore fundingStore) : BackgroundService
+    FundingStore fundingStore,
+    LiquidationStore liquidationStore) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -24,6 +26,8 @@ public sealed class RenderPulseService(
             orderBookStore.RaiseChanged();
             tradeStore.RaiseChanged();
             fundingStore.RaiseChanged();
+            liquidationStore.RaiseChanged();
+            liquidationStore.RaiseChanged();
         }
     }
 }

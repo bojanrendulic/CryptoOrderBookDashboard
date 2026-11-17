@@ -1,0 +1,46 @@
+@* Long vs short liquidation totals for one window. Always shown as lower bounds (≥): the stream
+   is a sample, and the window may not be fully covered. *@
+<div class="liq-card">
+    <div class="liq-card-title">
+        @Title <span class="liq-sampled" title="Sampled: at most one liquidation per symbol per second is published, so real totals are higher.">sampled</span>
+    </div>
+    <div class="liq-sides">
+        <div>
+            <div class="liq-label">Longs liquidated</div>
+            <div class="liq-value long-text">@AtLeast(Window.Totals.LongUsd)</div>
+            <div class="liq-muted liq-small">@Window.Totals.LongCount seen</div>
+        </div>
+        <div class="right">
+            <div class="liq-label">Shorts liquidated</div>
+            <div class="liq-value short-text">@AtLeast(Window.Totals.ShortUsd)</div>
+            <div class="liq-muted liq-small">@Window.Totals.ShortCount seen</div>
+        </div>
+    </div>
+    <div class="liq-bar" title="Share of sampled USD">
+        <div class="liq-bar-long" style="width:@(DisplayFormat.Percent((double)(Window.Totals.LongShare * 100)))%"></div>
+    </div>
+    <div class="liq-muted liq-small">
+        @if (Window.Totals.TotalUsd > 0)
+        {
+            @($"{Window.Totals.LongShare * 100:0}% longs / {(1 - Window.Totals.LongShare) * 100:0}% shorts")
+        }
+        @if (Window.Largest is { } largest)
+        {
+            <span> · largest @largest.Symbol @(largest.Side == LiquidatedSide.Long ? "long" : "short") @DisplayFormat.CompactUsd(largest.UsdValue)</span>
+        }
+    </div>
+    @if (!Window.FullyCovered)
+    {
+        <div class="liq-coverage-note">Only @DisplayFormat.Duration(Window.Covered) of this window was collected.</div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public string Title { get; set; } = string.Empty;
+
+    [Parameter, EditorRequired]
+    public LiquidationWindow Window { get; set; } = default!;
+
+    private static string AtLeast(decimal usd) => usd > 0 ? "≥ " + DisplayFormat.CompactUsd(usd) : "–";
+}

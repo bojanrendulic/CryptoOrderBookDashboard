@@ -16,7 +16,11 @@ dotnet run --project CryptoOrderBookDashboard  # run (Development launch profile
 dotnet watch --project CryptoOrderBookDashboard # run with hot reload
 ```
 
-There are no test projects in the solution yet. If tests are added, add the test project to `CryptoOrderBookDashboard.slnx` and update this file with the corresponding `dotnet test` invocation.
+```powershell
+dotnet test                                    # run all tests (CryptoOrderBookDashboard.Tests, xUnit)
+```
+
+`CryptoOrderBookDashboard.Tests` covers the persistence layer and `LiquidationStore`. Persistence tests use a real temp SQLite file (not `:memory:`), so WAL, pooling and the writer's own connections behave as in the app. The app project has `InternalsVisibleTo` for it.
 
 ## Architecture
 
@@ -34,6 +38,8 @@ Data flows one way: hosted services → singleton stores → UI components.
   - `FundingStore` keeps raw settlements and publishes per-symbol `FundingHistorySummary` objects (rolling 30-day total, daily sums). Its version-cached `GetRows()` is shared by all viewers.
   - `PositioningService` (singleton + hosted) fetches open interest and long/short ratios per symbol. It refreshes tracked symbols every 5 min and fetches other symbols only on demand (`EnsureFreshAsync`, 5-min TTL, at most 2 concurrent fetches).
   - `FundingMath` holds the domain rules. Neutral is **+0.01%/8h** (the interest component), not 0. Rates must be normalized with `To8h` before comparing symbols with 4h or 1h intervals. Sentiment thresholds live in `Classify`.
+- **Liquidations (`Liquidations/`)** cover all USDT-M perpetuals from the single `!forceOrder@arr` stream (`LiquidationHostedService`). Binance pushes **at most one liquidation per symbol per second**, so it is a *sample*: every total in the UI is a lower bound ("≥", "sampled") and must never be shown as exact. There is **no public REST history**, so missed liquidations (disconnects, app downtime) are gone for good. Side mapping: an order side `SELL` liquidates a **long**, `BUY` a short; size is average price × filled quantity. `LiquidationStore` keeps 24h in memory: events for the tape, per-minute buckets per symbol/side for the 1h/24h totals and top symbols, active seconds for "sampling pressure" (consecutive seconds with a liquidation, where more were likely hidden), and feed sessions for coverage/gaps. On startup it is restored from the database.
+- **Persistence (`Persistence/`)**: SQLite via Microsoft.Data.Sqlite + Dapper (no EF Core). `SqliteDatabase` opens connections (`synchronous=NORMAL`, `busy_timeout`) and runs `Migrations` (numbered scripts tracked by `PRAGMA user_version`; append, never edit a shipped one) on startup, before any hosted service runs; the file is in WAL mode with incremental auto-vacuum. **All writes go through the single `PersistenceWriter`**: feeds call `TryEnqueue(PersistWrite)` (never blocks; drops and counts when the bounded queue is full) and the writer commits batches in one transaction each (≈1s or 500 writes), retrying a failed batch row by row. It is registered before the feeds so it stops last and drains its queue. Up to one flush interval of queued writes is lost on a crash, so **writes must be idempotent**: use `ON CONFLICT DO NOTHING` for duplicates (never `INSERT OR IGNORE`, which also silently skips CHECK violations) and absolute-value upserts for aggregates. Store times as INTEGER unix ms (UTC) and numbers as REAL (pass `double`: Microsoft.Data.Sqlite stores `decimal` as TEXT). `RetentionService` deletes rows older than `RetentionDays` daily in chunks; register new time-stamped tables in its list. Liquidations persist per-minute totals of every liquidation, individual ones at or above `Liquidations:MinPersistUsd`, and feed sessions (30s heartbeat) for gaps.
 - **Keys**: `OrderBookKey(MarketType, Symbol)` identifies a feed in both stores.
 - **`Common/`** holds the shared helpers: `NotionalRange` (size-filter presets: `Presets` ranges for the trade tape, `MinimumPresets` min-only for the order book) and `Notional` (`InRange`, `SizeTier`), and `DisplayFormat` (number/USD/market label formatting). Use these instead of re-implementing them in components or services.
 
@@ -44,17 +50,20 @@ Data flows one way: hosted services → singleton stores → UI components.
 - `Components/Pages/FundingRates.razor` (`/funding`, optional `?symbol=`) has a market summary, a search/scope/extremes filter, a sortable table showing 100 rows at a time (paged on purpose, because `Virtualize` didn't render rows in testing and ~900 rows every second is a heavy diff), and a detail panel for the selected symbol. It refreshes at most once a second. `Components/Funding/FundingBars` is a dependency-free SVG bar chart.
 - `Components/OrderBook/DepthChart` draws the cumulative bid/ask "V" chart as inline SVG above the rows (collapsible, shown by default) on a linear price axis from `Low` to `High`; mid sits where it falls. The band comes from the page's Depth selector. Its "Rows" option (`DepthBand.Percent == null`) makes the bar and chart follow the visible rows instead: they sum only the filtered, grouped rows within ±`RowsMaxPercent` (50%) of mid, so bar, chart and table agree; the axis range comes from `RowsRange` (widens at once, shrinks only after 10s); without a size filter it falls back to ±1%. In ±% mode the chart and bar ignore Min size and Group, so when table rows lie beyond the band the panel shows a note pointing to Rows. Rows curves are built per viewer from the snapshot rows (at most 200). and `OrderBookPanel` refreshes the curve at most once a second on the existing pulse, catching up once a book goes quiet, so the chart adds only four changing SVG paths (area and line per side) plus its `data-curve` attribute to the render diff. The hover crosshair/tooltip (price, % from mid, cumulative USD) is computed entirely in `DepthChart.razor.js` from `data-curve` and drawn into `.depth-chart-overlay`, a div Blazor never renders into, so hovering never round-trips to the server. `STEPS` in the JS must match `DepthCurve.Steps`.
 - `OrderBookPanel.razor.js` centers the order book on the spread by scrolling only the panel's `.order-book-columns` container, not the page.
-- `Components/Layout/MainLayout.razor` has the top nav (Order Book, Trades, Funding). Link new pages there.
+- `Components/Pages/Liquidations.razor` (`/liquidations`) shows coverage ("collecting since", gaps), 1h/24h `LiquidationWindowCard`s, sampling pressure, a filterable tape (newest 200; events restored from the database are faded) and the top symbols over 24h. Its CSS uses `::deep` throughout so the card component shares the classes.
+- `Components/Layout/MainLayout.razor` has the top nav (Order Book, Trades, Funding, Liquidations). Link new pages there.
 
 ### Hosting
 
-- `Program.cs` registers options (`OrderBookDashboard` section → `OrderBookDashboardOptions`), `AddBinance()`, the stores, the hosted services and the search service, plus the standard Blazor Web App pipeline.
+- `Program.cs` registers options (`OrderBookDashboard`, `Persistence`, `Liquidations` sections), `AddBinance()`, the SQLite database and writer (before the feeds), initializes the database before `app.Run()`, the stores, the hosted services and the search service, plus the standard Blazor Web App pipeline.
 - Interactive Server means all component logic runs server-side over a SignalR circuit. `ReconnectModal` handles circuit drops.
 - Static assets are referenced through `@Assets[...]`. Bootstrap is vendored under `wwwroot/lib/bootstrap/`.
 
 ## Configuration
 
 `appsettings.json` → `OrderBookDashboard`: `DepthLevels`, `UpdateThrottleMilliseconds` (minimum 50), `MaxConcurrentHistoricalSearches` (default 2), and `Symbols[]` with `Symbol`, optional `DisplayName`, and `Markets` (`Spot` / `UsdFutures`; an empty list means both).
+
+`Persistence`: `DatabasePath` (default `data/dashboard.db`, relative to the content root, git-ignored), `RetentionDays` (default 365, 0 = forever), `BatchSize`, `FlushIntervalMilliseconds`, `QueueCapacity`. `Liquidations`: `MinPersistUsd` (default 200000).
 
 ## Known limitations / ideas
 
